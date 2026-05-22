@@ -1,0 +1,180 @@
+=====================================================
+  GOOGLE ADS TOOLKIT - HƯỚNG DẪN SỬ DỤNG
+=====================================================
+
+KHỞI ĐỘNG APP
+--------------
+  cd /Users/huyen/google-ads-toolkit
+  npm run dev
+
+  Mở trình duyệt: http://localhost:3000
+
+
+=====================================================
+TOOL 1 - CAMPAIGN AUDIT (/audit)
+=====================================================
+
+Export data từ Google Ads:
+  Reports → Predefined reports → Campaign
+  Thêm cột: Quality Score, Search Impr. Share, Conv. rate
+  Download → CSV
+
+Cách dùng:
+  1. Upload CSV hoặc click "Tải dữ liệu mẫu"
+  2. Xem 4 stat cards: tổng / tốt / cần cải thiện / kém
+  3. Click tiêu đề cột để sort tăng/giảm
+  4. Click filter pill để lọc theo mức (Tốt / Cần cải thiện / Kém)
+  5. Click một row → modal chi tiết với breakdown 4 thành phần + action items
+  6. Click "Export CSV" để lưu kết quả
+
+Công thức chấm điểm (0-100):
+  CTR          25đ  →  >5% = 25  |  2-5% = 15  |  <2% = 5
+  Conv. Rate   25đ  →  >3% = 25  |  1-3% = 15  |  <1% = 5
+  Quality Score 30đ →  >7  = 30  |  4-7  = 18  |  <4  = 5
+  Imp. Share   20đ  →  >60%= 20  | 30-60%= 12  |  <30%= 4
+
+Phân loại:
+  Tốt           70-100 (xanh)
+  Cần cải thiện 40-69  (vàng)
+  Kém           0-39   (đỏ)
+
+
+=====================================================
+TOOL 2 - SEARCH TERMS (/search-terms)
+=====================================================
+
+Export data từ Google Ads:
+  Keywords → Search terms → chọn date range → Download CSV
+
+Cách dùng:
+  1. Upload CSV hoặc click "Tải dữ liệu mẫu" (40 search terms)
+  2. Xem banner đỏ: tổng chi phí lãng phí ước tính
+  3. Chuyển qua 4 tab: Winner / Tiềm năng / Lãng phí / Không liên quan
+  4. Tick checkbox để chọn từng row (tick header để chọn tất cả)
+  5. "Export Negative .txt" → file upload thẳng vào Google Ads dạng [keyword]
+  6. "Export Winners .csv" → danh sách để thêm Exact Match keyword mới
+
+Quy tắc phân loại:
+  WINNER      → Conversions > 0
+  WASTE       → Cost > avgCPC × 3 và Conv = 0
+  POTENTIAL   → Clicks >= 5 và CTR >= 3% và Conv = 0
+  IRRELEVANT  → CTR < 0.5% và Impressions >= 100
+
+
+=====================================================
+TOOL 3 - QUALITY SCORE (/quality-score)
+=====================================================
+
+Export data từ Google Ads:
+  Keywords → Columns → thêm: Quality Score, Exp. CTR,
+  Ad Relevance, Landing Page Exp. → Download CSV
+
+Cách dùng:
+  1. Upload CSV hoặc click "Tải dữ liệu mẫu" (25 keywords)
+  2. Đọc 4 stat cards: QS TB / keyword tốt / keyword kém / bottleneck
+  3. Xem bar chart phân bố QS 1-10:
+       Xanh = QS 7-10 (tốt)
+       Vàng = QS 4-6  (trung bình)
+       Đỏ   = QS 1-3  (kém)
+  4. Xem Bottleneck Analysis: 3 thanh ngang cho thấy
+     thành phần nào có nhiều "Below average" nhất
+  5. Filter bảng theo Campaign và Ad Group
+  6. Toggle "QS thấp nhất trước" để ưu tiên fix
+  7. Đọc cột "Gợi ý sửa" → action cụ thể cho từng keyword
+
+Icon trong bảng:
+  ✓  = Above average
+  —  = Average
+  ✗  = Below average
+
+Gợi ý sửa theo component:
+  Exp. CTR thấp      → Thêm keyword vào headline, cải thiện ad copy
+  Ad Relevance thấp  → Tách ad group nhỏ hơn, viết ad match keyword
+  Landing Page thấp  → Tối ưu tốc độ tải, nội dung liên quan, mobile UX
+
+
+=====================================================
+TOOL 4 - AUDIT CHECKLIST (/checklist)
+=====================================================
+
+Không cần upload file - dùng trực tiếp.
+
+Cách dùng:
+  1. Click tiêu đề nhóm để mở/đóng accordion (6 nhóm)
+  2. Tick checkbox từng hạng mục khi đã hoàn thành
+  3. Click mũi tên ▼ bên phải để xem hướng dẫn chi tiết
+  4. Theo dõi progress bar từng nhóm và tổng ở đầu trang
+  5. State tự động lưu localStorage - refresh không mất
+  6. Click "Export PDF" → Ctrl+P / Cmd+P → Save as PDF
+  7. Click "Reset" (có confirm) để bắt đầu lại
+
+6 nhóm kiểm tra (50 hạng mục):
+  Nhóm 1: Cấu trúc tài khoản  (8 mục)
+  Nhóm 2: Từ khóa             (10 mục)
+  Nhóm 3: Quảng cáo           (8 mục)
+  Nhóm 4: Bid & Budget        (8 mục)
+  Nhóm 5: Landing Page        (8 mục)
+  Nhóm 6: Tracking & Đo lường (8 mục)
+
+Badge ưu tiên:
+  Critical      (đỏ)  → Phải làm ngay, ảnh hưởng trực tiếp
+  Important     (vàng) → Nên làm, tác động đáng kể
+  Nice-to-have  (xám) → Có thì tốt, tối ưu thêm
+
+
+=====================================================
+LƯU Ý KHI DÙNG FILE CSV THẬT
+=====================================================
+
+Nếu parse lỗi, kiểm tra:
+  - File phải là .csv (không phải .xlsx)
+  - Trong Google Ads: Download → chọn CSV (không chọn Google Sheets)
+  - Tên cột cần chứa: "Campaign", "Keyword", hoặc "Search term"
+    (tool tự detect header, bỏ qua các dòng tiêu đề thừa)
+
+Cột bắt buộc theo từng tool:
+  Campaign Audit: Campaign, Impressions, Clicks, CTR, Cost,
+                  Conversions, Conv. rate, Search Impr. share,
+                  Avg. Quality Score
+  Search Terms:   Search term, Impressions, Clicks, CTR,
+                  Avg. CPC, Cost, Conversions
+  Quality Score:  Keyword, Campaign, Ad group, Quality Score,
+                  Exp. CTR, Ad Relevance, Landing Page Exp.
+
+
+=====================================================
+CẤU TRÚC THƯ MỤC
+=====================================================
+
+google-ads-toolkit/
+  src/app/
+    audit/page.tsx          Tool 1
+    search-terms/page.tsx   Tool 2
+    quality-score/page.tsx  Tool 3
+    checklist/page.tsx      Tool 4
+  src/lib/
+    csv-parser.ts           Parse CSV Google Ads
+    scoring.ts              Logic chấm điểm
+    constants.ts            Ngưỡng điểm, màu sắc
+  src/components/
+    layout/Sidebar.tsx      Sidebar điều hướng
+    shared/CsvUploader.tsx  Component upload dùng chung
+  public/sample-data/
+    sample-campaigns.csv    10 campaigns mẫu
+    sample-search-terms.csv 40 search terms mẫu
+    sample-keywords.csv     25 keywords mẫu
+
+
+=====================================================
+DEPLOY LÊN VERCEL
+=====================================================
+
+  npm i -g vercel
+  vercel login
+  vercel --prod
+
+Sau khi deploy vào Vercel Dashboard:
+  Settings → Environment Variables
+  (App này không cần API key vì không dùng AI)
+
+=====================================================

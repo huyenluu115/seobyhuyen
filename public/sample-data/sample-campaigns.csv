@@ -1,0 +1,11 @@
+Campaign,Impressions,Clicks,CTR,Avg. CPC,Cost,Conversions,Conv. rate,Search Impr. share,Avg. Quality Score
+Brand - Exact Match,45200,3150,6.97%,12500,39375000,142,4.51%,78.50%,8
+Brand - Broad Match,28400,1680,5.92%,9800,16464000,65,3.87%,62.30%,7
+Non-Brand - Core,125000,3200,2.56%,35000,112000000,45,1.41%,34.20%,5
+Non-Brand - Competitor,88000,1540,1.75%,42000,64680000,12,0.78%,28.60%,4
+Remarketing - All Visitors,32000,2240,7.00%,18000,40320000,98,4.38%,82.10%,7
+Product - Category A,67000,2950,4.40%,22000,64900000,88,2.98%,55.40%,6
+Product - Category B,43000,860,2.00%,28000,24080000,8,0.93%,22.80%,3
+Seasonal - Sale Campaign,19000,1140,6.00%,15000,17100000,52,4.56%,71.20%,8
+Discovery - Awareness,156000,1720,1.10%,8500,14620000,3,0.17%,18.90%,3
+Long-tail - High Intent,21000,1260,6.00%,19000,23940000,67,5.32%,68.50%,9

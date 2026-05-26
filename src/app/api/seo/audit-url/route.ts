@@ -25,6 +25,12 @@ export interface AuditResult {
   canonicalMatchesFinal: boolean
   viewport: boolean
   ogImage: boolean
+  ogImageUrl: string
+  ogTitle: string
+  ogDescription: string
+  twitterTitle: string
+  twitterDescription: string
+  twitterImageUrl: string
   ogType: string
   jsonLd: boolean
   twitterCard: boolean
@@ -191,8 +197,14 @@ export async function POST(req: NextRequest) {
 
   // ── Tech checks ──────────────────────────────────────────────────────────
   const viewport = /<meta[^>]+name=["']viewport["']/i.test(html)
-  const ogImage = !!extractMeta(html, 'og:image')
+  const ogImageUrl = extractMeta(html, 'og:image')
+  const ogImage = !!ogImageUrl
   const ogType = extractMeta(html, 'og:type')
+  const ogTitle = extractMeta(html, 'og:title') || title
+  const ogDescription = extractMeta(html, 'og:description') || description
+  const twitterTitle = extractMeta(html, 'twitter:title') || ogTitle
+  const twitterDescription = extractMeta(html, 'twitter:description') || ogDescription
+  const twitterImageUrl = extractMeta(html, 'twitter:image') || ogImageUrl
   const jsonLd = /<script[^>]+type=["']application\/ld\+json["']/i.test(html)
   const twitterCard = !!extractMeta(html, 'twitter:card')
   const datePublished = /datePublished|date_published|article:published_time/i.test(html)
@@ -233,7 +245,9 @@ export async function POST(req: NextRequest) {
     images: { total: totalImages, missingAlt, shortAlt, spamAlt },
     internalLinks, externalLinks,
     canonical, canonicalMatchesFinal,
-    viewport, ogImage, ogType, jsonLd, twitterCard, datePublished,
+    viewport, ogImage, ogImageUrl, ogType, ogTitle, ogDescription,
+    twitterCard, twitterTitle, twitterDescription, twitterImageUrl,
+    jsonLd, datePublished,
     issues, issueCount: issues.length, slug, bodyText,
   } satisfies AuditResult)
 }

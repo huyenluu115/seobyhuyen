@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BarChart2, Search, TrendingUp, CheckSquare, BookOpen, FileSearch, Code2, ImageIcon } from 'lucide-react'
+import { BarChart2, Search, TrendingUp, CheckSquare, BookOpen, FileSearch, Code2, ImageIcon, Eye, ShieldCheck, Share2, Shield, Map, Activity } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const adsItems = [
@@ -18,6 +18,12 @@ const seoItems = [
 ]
 
 const toolItems = [
+  { href: '/tools/social-preview', label: 'Social Preview', icon: Share2 },
+  { href: '/tools/robots', label: 'Robots.txt', icon: Shield },
+  { href: '/tools/sitemap', label: 'Sitemap Checker', icon: Map },
+  { href: '/tools/bulk-status', label: 'Bulk URL Checker', icon: Activity },
+  { href: '/tools/title-preview', label: 'Title Previewer', icon: Eye },
+  { href: '/tools/canonical', label: 'Canonical Checker', icon: ShieldCheck },
   { href: '/tools/image', label: 'Image Compressor', icon: ImageIcon },
 ]
 

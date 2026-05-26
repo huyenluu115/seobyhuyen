@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { Layers, Download, Upload, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react'
+import { Layers, Download, Upload, ZoomIn, ZoomOut, RotateCcw, Loader2 } from 'lucide-react'
 
 const FRAME_W = 650
 const FRAME_H = 371
@@ -15,6 +15,8 @@ export default function FrameComposerPage() {
   const [scale, setScale] = useState(1)
   const [pos, setPos] = useState({ x: 0, y: 0 })
   const [dragging, setDragging] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [jpgSize, setJpgSize] = useState<number | null>(null)
   const dragStart = useRef({ mx: 0, my: 0, px: 0, py: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
   const [displayScale, setDisplayScale] = useState(1)
@@ -125,12 +127,41 @@ export default function FrameComposerPage() {
     setPos({ x: (FRAME_W - photoImg.width * s) / 2, y: (FRAME_H - photoImg.height * s) / 2 })
   }
 
-  function handleDownload() {
+  function handleDownloadPNG() {
     const canvas = canvasRef.current
     if (!canvas) return
     const a = document.createElement('a')
     a.href = canvas.toDataURL('image/png')
     a.download = 'framed-image.png'
+    a.click()
+  }
+
+  async function handleDownloadJPG() {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    setDownloading(true)
+    // Offscreen canvas with white background (JPG has no alpha)
+    const off = document.createElement('canvas')
+    off.width = FRAME_W; off.height = FRAME_H
+    const ctx = off.getContext('2d')!
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, FRAME_W, FRAME_H)
+    ctx.drawImage(canvas, 0, 0)
+    // Binary search: highest quality that stays ≤ 100KB
+    let lo = 0.05, hi = 0.95, bestBlob: Blob | null = null
+    for (let i = 0; i < 14; i++) {
+      const q = (lo + hi) / 2
+      const blob = await new Promise<Blob | null>(r => off.toBlob(r, 'image/jpeg', q))
+      if (!blob) break
+      if (blob.size <= 100 * 1024) { bestBlob = blob; lo = q }
+      else hi = q
+    }
+    setDownloading(false)
+    if (!bestBlob) return
+    setJpgSize(Math.round(bestBlob.size / 1024))
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(bestBlob)
+    a.download = 'framed-image.jpg'
     a.click()
   }
 
@@ -235,10 +266,20 @@ export default function FrameComposerPage() {
           )}
 
           {/* Download */}
-          <Button onClick={handleDownload} disabled={!ready}
-            className="w-full gap-2 bg-violet-600 hover:bg-violet-700">
-            <Download size={14} />Tải ảnh về (PNG)
-          </Button>
+          <div className="space-y-2">
+            <Button onClick={handleDownloadJPG} disabled={!ready || downloading}
+              className="w-full gap-2 bg-violet-600 hover:bg-violet-700">
+              {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              {downloading ? 'Đang nén...' : 'Tải JPG < 100KB'}
+            </Button>
+            {jpgSize && (
+              <p className="text-xs text-center text-gray-500">✓ {jpgSize}KB</p>
+            )}
+            <Button onClick={handleDownloadPNG} disabled={!ready} variant="outline"
+              className="w-full gap-2 text-gray-600">
+              <Download size={14} />Tải PNG (gốc)
+            </Button>
+          </div>
         </div>
       </div>
     </div>

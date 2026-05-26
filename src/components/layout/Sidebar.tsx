@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BarChart2, Search, TrendingUp, CheckSquare, BookOpen, FileSearch, Code2, ImageIcon, Eye, ShieldCheck, Share2, Shield, Map, Activity } from 'lucide-react'
+import { BarChart2, Search, TrendingUp, CheckSquare, BookOpen, FileSearch, Code2, ImageIcon, Eye, ShieldCheck, Share2, Shield, Map, Activity, Layers } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const adsItems = [
@@ -18,6 +18,7 @@ const seoItems = [
 ]
 
 const toolItems = [
+  { href: '/tools/frame-composer', label: 'Frame Composer', icon: Layers },
   { href: '/tools/social-preview', label: 'Social Preview', icon: Share2 },
   { href: '/tools/robots', label: 'Robots.txt', icon: Shield },
   { href: '/tools/sitemap', label: 'Sitemap Checker', icon: Map },

@@ -1,0 +1,246 @@
+'use client'
+
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+import { Layers, Download, Upload, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react'
+
+const FRAME_W = 650
+const FRAME_H = 371
+
+export default function FrameComposerPage() {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [frameImg, setFrameImg] = useState<HTMLImageElement | null>(null)
+  const [photoImg, setPhotoImg] = useState<HTMLImageElement | null>(null)
+  const [scale, setScale] = useState(1)
+  const [pos, setPos] = useState({ x: 0, y: 0 })
+  const [dragging, setDragging] = useState(false)
+  const dragStart = useRef({ mx: 0, my: 0, px: 0, py: 0 })
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [displayScale, setDisplayScale] = useState(1)
+
+  // Responsive canvas display scale
+  useEffect(() => {
+    function update() {
+      if (!containerRef.current) return
+      const w = containerRef.current.offsetWidth
+      setDisplayScale(Math.min(1, w / FRAME_W))
+    }
+    update()
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
+
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    ctx.clearRect(0, 0, FRAME_W, FRAME_H)
+    ctx.fillStyle = '#e8e8e8'
+    ctx.fillRect(0, 0, FRAME_W, FRAME_H)
+
+    if (photoImg) {
+      ctx.drawImage(photoImg, pos.x, pos.y, photoImg.width * scale, photoImg.height * scale)
+    }
+    if (frameImg) {
+      ctx.drawImage(frameImg, 0, 0, FRAME_W, FRAME_H)
+    }
+  }, [frameImg, photoImg, scale, pos])
+
+  useEffect(() => { draw() }, [draw])
+
+  function loadImage(file: File): Promise<HTMLImageElement> {
+    return new Promise((resolve) => {
+      const img = new Image()
+      img.onload = () => resolve(img)
+      img.src = URL.createObjectURL(file)
+    })
+  }
+
+  async function handleFrame(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const img = await loadImage(file)
+    setFrameImg(img)
+  }
+
+  async function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const img = await loadImage(file)
+    const s = Math.max(FRAME_W / img.width, FRAME_H / img.height)
+    setScale(s)
+    setPos({ x: (FRAME_W - img.width * s) / 2, y: (FRAME_H - img.height * s) / 2 })
+    setPhotoImg(img)
+  }
+
+  function toCanvasCoords(clientX: number, clientY: number) {
+    const canvas = canvasRef.current
+    if (!canvas) return { cx: clientX, cy: clientY }
+    const rect = canvas.getBoundingClientRect()
+    return {
+      cx: (clientX - rect.left) / displayScale,
+      cy: (clientY - rect.top) / displayScale,
+    }
+  }
+
+  function onPointerDown(e: React.PointerEvent) {
+    if (!photoImg) return
+    e.currentTarget.setPointerCapture(e.pointerId)
+    setDragging(true)
+    dragStart.current = { mx: e.clientX, my: e.clientY, px: pos.x, py: pos.y }
+  }
+
+  function onPointerMove(e: React.PointerEvent) {
+    if (!dragging) return
+    const dx = (e.clientX - dragStart.current.mx) / displayScale
+    const dy = (e.clientY - dragStart.current.my) / displayScale
+    setPos({ x: dragStart.current.px + dx, y: dragStart.current.py + dy })
+  }
+
+  function onPointerUp() { setDragging(false) }
+
+  function onWheel(e: React.WheelEvent) {
+    e.preventDefault()
+    if (!photoImg) return
+    const { cx, cy } = toCanvasCoords(e.clientX, e.clientY)
+    const delta = -e.deltaY * 0.001
+    setScale(prev => {
+      const next = Math.max(0.05, Math.min(10, prev + delta))
+      // Zoom toward cursor
+      setPos(p => ({
+        x: cx - (cx - p.x) * (next / prev),
+        y: cy - (cy - p.y) * (next / prev),
+      }))
+      return next
+    })
+  }
+
+  function handleReset() {
+    if (!photoImg) return
+    const s = Math.max(FRAME_W / photoImg.width, FRAME_H / photoImg.height)
+    setScale(s)
+    setPos({ x: (FRAME_W - photoImg.width * s) / 2, y: (FRAME_H - photoImg.height * s) / 2 })
+  }
+
+  function handleDownload() {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const a = document.createElement('a')
+    a.href = canvas.toDataURL('image/png')
+    a.download = 'framed-image.png'
+    a.click()
+  }
+
+  const ready = !!(frameImg || photoImg)
+
+  return (
+    <div className="p-6 md:p-8 pb-16 min-h-screen" style={{ background: '#f8f9fb' }}>
+      <div className="mb-6">
+        <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+          <Layers size={20} className="text-violet-500" />Frame Composer
+        </h1>
+        <p className="text-sm text-gray-500 mt-0.5">Ghép ảnh vào khung — 650×371px. Kéo để di chuyển, cuộn chuột để zoom.</p>
+      </div>
+
+      <div className="flex flex-col lg:flex-row gap-6 items-start max-w-5xl">
+        {/* Canvas */}
+        <div ref={containerRef} className="flex-1 min-w-0 space-y-2">
+          <div className="overflow-hidden rounded-2xl border border-gray-200 shadow-sm bg-white"
+            style={{ width: '100%', height: FRAME_H * displayScale }}>
+            <canvas
+              ref={canvasRef}
+              width={FRAME_W}
+              height={FRAME_H}
+              style={{
+                display: 'block',
+                width: FRAME_W * displayScale,
+                height: FRAME_H * displayScale,
+                cursor: dragging ? 'grabbing' : photoImg ? 'grab' : 'default',
+                touchAction: 'none',
+              }}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerLeave={onPointerUp}
+              onWheel={onWheel}
+            />
+          </div>
+          {!ready && (
+            <p className="text-xs text-gray-400 text-center">Upload khung và ảnh để bắt đầu</p>
+          )}
+          {ready && (
+            <p className="text-xs text-gray-400 text-center">
+              Kéo để di chuyển ảnh · Cuộn chuột để zoom · {Math.round(scale * 100)}%
+            </p>
+          )}
+        </div>
+
+        {/* Controls */}
+        <div className="space-y-4 w-full lg:w-56 shrink-0">
+          {/* Upload frame */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">1. Khung (PNG)</p>
+            <label className={cn(
+              'flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-dashed cursor-pointer transition-colors',
+              frameImg ? 'border-violet-300 bg-violet-50' : 'border-gray-200 hover:border-violet-300 hover:bg-violet-50'
+            )}>
+              <Upload size={18} className={frameImg ? 'text-violet-500' : 'text-gray-400'} />
+              <span className="text-xs text-center text-gray-500 leading-relaxed">
+                {frameImg ? <span className="text-violet-600 font-semibold">✓ Đã tải khung</span> : 'PNG trong suốt\n(nền alpha)'}
+              </span>
+              <input type="file" accept="image/png,image/*" className="hidden" onChange={handleFrame} />
+            </label>
+          </div>
+
+          {/* Upload photo */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">2. Ảnh của bạn</p>
+            <label className={cn(
+              'flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-dashed cursor-pointer transition-colors',
+              photoImg ? 'border-violet-300 bg-violet-50' : 'border-gray-200 hover:border-violet-300 hover:bg-violet-50'
+            )}>
+              <Upload size={18} className={photoImg ? 'text-violet-500' : 'text-gray-400'} />
+              <span className="text-xs text-center text-gray-500">
+                {photoImg ? <span className="text-violet-600 font-semibold">✓ Đã tải ảnh</span> : 'JPG, PNG, WebP'}
+              </span>
+              <input type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
+            </label>
+          </div>
+
+          {/* Scale */}
+          {photoImg && (
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">Zoom ảnh</p>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setScale(s => Math.max(0.05, s - 0.05))}
+                  className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+                  <ZoomOut size={15} className="text-gray-600" />
+                </button>
+                <input type="range" min={0.05} max={10} step={0.01} value={scale}
+                  onChange={e => setScale(parseFloat(e.target.value))}
+                  className="flex-1 accent-violet-500" />
+                <button onClick={() => setScale(s => Math.min(10, s + 0.05))}
+                  className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+                  <ZoomIn size={15} className="text-gray-600" />
+                </button>
+              </div>
+              <button onClick={handleReset}
+                className="w-full flex items-center justify-center gap-1.5 text-xs text-gray-500 hover:text-violet-600 py-1.5 rounded-lg hover:bg-violet-50 transition-colors">
+                <RotateCcw size={12} />Căn giữa & reset
+              </button>
+            </div>
+          )}
+
+          {/* Download */}
+          <Button onClick={handleDownload} disabled={!ready}
+            className="w-full gap-2 bg-violet-600 hover:bg-violet-700">
+            <Download size={14} />Tải ảnh về (PNG)
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}

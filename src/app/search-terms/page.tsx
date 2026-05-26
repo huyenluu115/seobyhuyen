@@ -20,18 +20,19 @@ interface STRow {
   cpc: number
   cost: number
   conversions: number
-  category: 'WINNER' | 'POTENTIAL' | 'WASTE' | 'IRRELEVANT'
+  category: 'WINNER' | 'POTENTIAL' | 'WASTE' | 'IRRELEVANT' | 'UNKNOWN'
 }
 
-const CATS = ['WINNER', 'POTENTIAL', 'WASTE', 'IRRELEVANT'] as const
+const CATS = ['WINNER', 'POTENTIAL', 'WASTE', 'IRRELEVANT', 'UNKNOWN'] as const
 type Cat = typeof CATS[number]
 type SortKey = 'impressions' | 'clicks' | 'ctr' | 'cost' | 'conversions' | 'cpc'
 
 const CAT_META: Record<Cat, { label: string; desc: string; badge: string; color: string }> = {
-  WINNER:     { label: 'Winner',          desc: 'Conv > 0 — giữ lại, thêm Exact Match',     badge: 'bg-green-100 text-green-700 border-green-200',   color: '#22c55e' },
-  POTENTIAL:  { label: 'Tiềm năng',       desc: 'Clicks ≥ 5, CTR ≥ 3% — theo dõi thêm',    badge: 'bg-blue-100 text-blue-700 border-blue-200',      color: '#3b82f6' },
-  WASTE:      { label: 'Lãng phí',        desc: 'Cost > avgCPC×3, Conv = 0 — thêm negative', badge: 'bg-red-100 text-red-700 border-red-200',         color: '#ef4444' },
-  IRRELEVANT: { label: 'Không liên quan', desc: 'CTR < 0.5%, Imp ≥ 100 — xem xét negative', badge: 'bg-orange-100 text-orange-700 border-orange-200', color: '#f97316' },
+  WINNER:     { label: 'Winner',            desc: 'Conv > 0 — giữ lại, thêm Exact Match',              badge: 'bg-green-100 text-green-700 border-green-200',   color: '#22c55e' },
+  POTENTIAL:  { label: 'Tiềm năng',         desc: 'Có clicks, CTR ổn, chưa conv — theo dõi thêm',     badge: 'bg-blue-100 text-blue-700 border-blue-200',      color: '#3b82f6' },
+  WASTE:      { label: 'Lãng phí',          desc: 'Tốn tiền nhiều hơn avg × 3, conv = 0 — cân nhắc negative', badge: 'bg-red-100 text-red-700 border-red-200',  color: '#ef4444' },
+  IRRELEVANT: { label: 'Không liên quan',   desc: 'CTR < 0.5%, đủ impression — thêm negative',        badge: 'bg-orange-100 text-orange-700 border-orange-200', color: '#f97316' },
+  UNKNOWN:    { label: 'Chưa đủ dữ liệu',  desc: '0 click — hiện impression nhưng chưa ai click vào', badge: 'bg-gray-100 text-gray-500 border-gray-200',       color: '#9ca3af' },
 }
 
 function parseN(v: string) { return parseFloat((v || '0').replace(/,/g, '').replace(/\s/g, '')) || 0 }
@@ -75,7 +76,11 @@ export default function SearchTermsPage() {
     }
 
     const cpcs = data.map(r => parseN(get(r, 'Avg. CPC', 'Avg CPC', 'CPC Tr.bình', 'CPC trung bình')))
-    const avgCpc = cpcs.reduce((a, b) => a + b, 0) / (cpcs.length || 1)
+    // avgCPC chỉ tính từ rows có click thực sự, tránh bị kéo về 0 bởi hàng loạt terms 0-click
+    const cpcsWithClicks = cpcs.filter(c => c > 0)
+    const avgCpc = cpcsWithClicks.length > 0
+      ? cpcsWithClicks.reduce((a, b) => a + b, 0) / cpcsWithClicks.length
+      : 1
 
     const parsed: STRow[] = data.map((r, i) => {
       const conv = parseN(get(r, 'Conversions', 'Lượt chuyển đổi'))
@@ -85,9 +90,9 @@ export default function SearchTermsPage() {
       const imp = parseN(get(r, 'Impressions', 'Số lượt hiển thị', 'Lượt hiển thị'))
       let cat: Cat
       if (conv > 0) cat = 'WINNER'
-      else if (cpcs[i] > avgCpc * 3 && conv === 0 && cost > 0) cat = 'WASTE'
-      else if (clicks >= 5 && ctr >= 3 && conv === 0) cat = 'POTENTIAL'
-      else if (ctr < 0.5 && imp >= 100) cat = 'IRRELEVANT'
+      else if (clicks === 0) cat = 'UNKNOWN'                              // chưa đủ data
+      else if (cpcs[i] > avgCpc * 3 && conv === 0) cat = 'WASTE'         // tốn tiền gấp 3 avg, 0 conv
+      else if (ctr < 0.5 && imp >= 15) cat = 'IRRELEVANT'                // imp đủ lớn để kết luận CTR quá thấp
       else cat = 'POTENTIAL'
       return {
         term: get(r, 'Search term', 'search term', 'Cụm từ tìm kiếm', 'Cụm từ tìm kiếm '),
@@ -126,7 +131,7 @@ export default function SearchTermsPage() {
   }, [rows, campaignFilter, search])
 
   const grouped = useMemo(() => {
-    const g: Record<Cat, STRow[]> = { WINNER: [], POTENTIAL: [], WASTE: [], IRRELEVANT: [] }
+    const g: Record<Cat, STRow[]> = { WINNER: [], POTENTIAL: [], WASTE: [], IRRELEVANT: [], UNKNOWN: [] }
     filteredRows.forEach(r => g[r.category].push(r))
     return g
   }, [filteredRows])
@@ -145,6 +150,7 @@ export default function SearchTermsPage() {
 
   const totalCost = filteredRows.reduce((s, r) => s + r.cost, 0)
   const wasteCost = grouped.WASTE.reduce((s, r) => s + r.cost, 0) + grouped.IRRELEVANT.reduce((s, r) => s + r.cost, 0)
+  const unknownCount = grouped.UNKNOWN.length
   const totalConv = filteredRows.reduce((s, r) => s + r.conversions, 0)
   const totalClicks = filteredRows.reduce((s, r) => s + r.clicks, 0)
 
@@ -184,16 +190,14 @@ export default function SearchTermsPage() {
 
   function exportNegatives(cat?: Cat) {
     const source = cat ? grouped[cat] : [...grouped.WASTE, ...grouped.IRRELEVANT]
-    const terms = source.filter(r => selected.size === 0 || selected.has(r.term))
-    const exact = terms.filter(r => r.ctr < 1 || r.clicks === 0).map(r => `[${r.term}]`)
-    const phrase = terms.filter(r => r.ctr >= 1 && r.clicks > 0).map(r => `"${r.term}"`)
-    exportToTxt([
-      '# Exact match negatives',
-      ...exact,
-      '',
-      '# Phrase match negatives',
-      ...phrase,
-    ], 'negative-keywords.txt')
+    // Never include terms with conversions
+    const terms = source
+      .filter(r => r.conversions === 0)
+      .filter(r => selected.size === 0 || selected.has(r.term))
+    exportToTxt(
+      terms.map(r => `[${r.term}]`),
+      'negative-keywords.txt'
+    )
   }
 
   function exportWinners() {
@@ -203,9 +207,10 @@ export default function SearchTermsPage() {
     )
   }
 
-  const negativeText = [...grouped.WASTE, ...grouped.IRRELEVANT].map(r =>
-    (r.ctr < 1 || r.clicks === 0) ? `[${r.term}]` : `"${r.term}"`
-  ).join('\n')
+  const negativeText = [...grouped.WASTE, ...grouped.IRRELEVANT]
+    .filter(r => r.conversions === 0 && r.clicks > 0)
+    .map(r => `[${r.term}]`)
+    .join('\n')
 
   const suggestText = suggestions.map(r => r.suggestedFormat).join('\n')
 
@@ -321,6 +326,12 @@ export default function SearchTermsPage() {
                 </div>
               </div>
 
+              {unknownCount > 0 && (
+                <div className="mt-4 flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-xs text-gray-500">
+                  <span className="font-medium">{unknownCount} terms chưa đủ dữ liệu</span>
+                  <span>— hiện impression nhưng 0 click, chưa thể phân loại. Chờ thêm data hoặc kiểm tra ad copy/bid.</span>
+                </div>
+              )}
               {wasteCost > 0 && (
                 <div className="mt-4 flex flex-wrap items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
                   <AlertTriangle size={15} className="text-red-500 shrink-0" />
@@ -350,9 +361,11 @@ export default function SearchTermsPage() {
                     {(cat === 'WASTE' || cat === 'IRRELEVANT') && (
                       <>
                         <CopiedBtn
-                          text={sortedRows(cat).filter(r => selected.size === 0 || selected.has(r.term)).map(r =>
-                            (r.ctr < 1 || r.clicks === 0) ? `[${r.term}]` : `"${r.term}"`
-                          ).join('\n')}
+                          text={sortedRows(cat)
+                            .filter(r => r.conversions === 0)
+                            .filter(r => selected.size === 0 || selected.has(r.term))
+                            .map(r => `[${r.term}]`)
+                            .join('\n')}
                           label="Copy phủ định"
                         />
                         <Button size="sm" variant="outline" className="text-xs gap-1" onClick={() => exportNegatives(cat)}>

@@ -46,7 +46,11 @@ export function parseGoogleAdsCsv(raw: string): Record<string, string>[] {
   return result.data.filter((row) => {
     const r = row as Record<string, string>
     const val = idKey ? (r[idKey] || '').trim() : Object.values(r)[0]?.trim() || ''
-    return val !== '' && val.toLowerCase() !== 'total' && val.toLowerCase() !== 'tổng'
+    const lower = val.toLowerCase()
+    return val !== '' && val !== '--'
+      && lower !== 'total' && lower !== 'tổng'
+      && !lower.startsWith('tổng số')
+      && !lower.startsWith('total:')
   }) as Record<string, string>[]
 }
 

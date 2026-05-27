@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BarChart2, Search, TrendingUp, CheckSquare, BookOpen, FileSearch, Code2, ImageIcon, Eye, ShieldCheck, Share2, Shield, Map, Activity, Layers } from 'lucide-react'
+import { BarChart2, Search, TrendingUp, CheckSquare, BookOpen, FileSearch, Code2, ImageIcon, Eye, ShieldCheck, Share2, Shield, Map, Activity, Layers, ScanSearch } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const adsItems = [
@@ -13,6 +13,7 @@ const adsItems = [
 ]
 
 const seoItems = [
+  { href: '/tools/seo-audit', label: 'Full SEO Audit', icon: ScanSearch },
   { href: '/seo/content', label: 'Content Optimizer', icon: FileSearch },
   { href: '/seo/schema', label: 'Schema Generator', icon: Code2 },
 ]

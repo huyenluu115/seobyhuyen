@@ -14,6 +14,15 @@ const STOP = new Set([
   'just','been','also','more','his','her','all','as','are','was',
 ])
 
+function decode(str: string) {
+  return str
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCharCode(parseInt(n, 16)))
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&[a-z]+;/gi, ' ')
+}
+
 function meta(html: string, name: string) {
   const m = html.match(new RegExp(`<meta[^>]+(?:name|property)=["']${name}["'][^>]+content=["']([^"']+)["']`, 'i'))
     || html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:name|property)=["']${name}["']`, 'i'))
@@ -106,7 +115,7 @@ export async function POST(req: NextRequest) {
     const re = new RegExp(`<h${i}[^>]*>([\\s\\S]*?)<\\/h${i}>`, 'gi')
     let m: RegExpExecArray | null
     while ((m = re.exec(html)) !== null)
-      hRaw.push({ level: i, text: m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim(), idx: m.index })
+      hRaw.push({ level: i, text: decode(m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()), idx: m.index })
   }
   hRaw.sort((a, b) => a.idx - b.idx)
   headings.push(...hRaw.map(({ level, text }) => ({ level, text })))

@@ -7,6 +7,7 @@ import { Layers, Download, Upload, ZoomIn, ZoomOut, RotateCcw, Loader2, Check, T
 
 const FRAME_W = 650
 const FRAME_H = 371
+const DPR = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1
 
 const PRESET_FRAMES = [
   { id: 'vnce',        label: 'VNCE',           src: '/frames/vnce-frame.png', overlay: true  },
@@ -79,57 +80,45 @@ export default function FrameComposerPage() {
     return () => ro.disconnect()
   }, [])
 
+  const lh = (sz: number) => sz * 1.35
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0)
     ctx.clearRect(0, 0, FRAME_W, FRAME_H)
     ctx.fillStyle = '#e8e8e8'
     ctx.fillRect(0, 0, FRAME_W, FRAME_H)
-    if (!frameOverlay && frameImg) {
-      // RGB frame (white bg): draw frame first, photo on top
-      ctx.drawImage(frameImg, 0, 0, FRAME_W, FRAME_H)
-    }
-    if (photoImg) {
-      ctx.drawImage(photoImg, pos.x, pos.y, photoImg.width * scale, photoImg.height * scale)
-    }
-    if (frameOverlay && frameImg) {
-      // RGBA frame (transparent): draw frame on top of photo
-      ctx.drawImage(frameImg, 0, 0, FRAME_W, FRAME_H)
-    }
-    // Draw text layers
+    if (!frameOverlay && frameImg) ctx.drawImage(frameImg, 0, 0, FRAME_W, FRAME_H)
+    if (photoImg) ctx.drawImage(photoImg, pos.x, pos.y, photoImg.width * scale, photoImg.height * scale)
+    if (frameOverlay && frameImg) ctx.drawImage(frameImg, 0, 0, FRAME_W, FRAME_H)
     textLayers.forEach(t => {
       const weight = t.bold ? 'bold' : 'normal'
       const style = t.italic ? 'italic' : 'normal'
       ctx.font = `${style} ${weight} ${t.fontSize}px Roboto, sans-serif`
       ctx.fillStyle = t.color
       ctx.textBaseline = 'top'
-      // Shadow for readability
-      ctx.shadowColor = 'rgba(0,0,0,0.5)'
+      ctx.shadowColor = 'rgba(0,0,0,0.45)'
       ctx.shadowBlur = 3
-      ctx.fillText(t.text, t.x, t.y)
+      const lines = t.text.split('\n')
+      lines.forEach((line, i) => ctx.fillText(line, t.x, t.y + i * lh(t.fontSize)))
       ctx.shadowBlur = 0
-      // Highlight active + resize handle
       if (t.id === activeText) {
-        const w = ctx.measureText(t.text).width
-        const H = 8
+        const maxW = Math.max(...lines.map(l => ctx.measureText(l).width))
+        const totalH = lines.length * lh(t.fontSize)
+        const H = 9
         ctx.strokeStyle = '#7c3aed'
         ctx.lineWidth = 1.5
         ctx.setLineDash([4, 3])
-        ctx.strokeRect(t.x - 4, t.y - 4, w + 8 + H, t.fontSize + 12)
+        ctx.strokeRect(t.x - 4, t.y - 4, maxW + 12 + H, totalH + 6)
         ctx.setLineDash([])
-        // Resize handle (right-center)
         ctx.fillStyle = '#7c3aed'
-        ctx.fillRect(t.x + w + 4, t.y + (t.fontSize - H) / 2, H, H)
-        // Move indicator dots
-        ctx.fillStyle = 'rgba(124,58,237,0.5)'
-        for (let r = 0; r < 2; r++) for (let c = 0; c < 3; c++) {
-          ctx.fillRect(t.x - 2 + c * 4, t.y + r * 5, 2, 2)
-        }
+        ctx.fillRect(t.x + maxW + 8, t.y + (totalH - H) / 2, H, H)
       }
     })
-  }, [frameImg, photoImg, scale, pos, textLayers, activeText])
+  }, [frameImg, frameOverlay, photoImg, scale, pos, textLayers, activeText])
 
   useEffect(() => { draw() }, [draw, fontReady])
 
@@ -315,18 +304,35 @@ export default function FrameComposerPage() {
     setScale(s); setPos({ x: (FRAME_W - photoImg.width * s) / 2, y: (FRAME_H - photoImg.height * s) / 2 })
   }
 
-  function handleDownloadPNG() {
-    const canvas = canvasRef.current; if (!canvas) return
-    const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = 'framed-image.png'; a.click()
-  }
-
-  async function handleDownloadJPG() {
-    const canvas = canvasRef.current; if (!canvas) return
-    setDownloading(true)
+  // Render clean 650x371 canvas for download (no DPR scaling)
+  function buildExportCanvas(): HTMLCanvasElement {
     const off = document.createElement('canvas')
     off.width = FRAME_W; off.height = FRAME_H
     const ctx = off.getContext('2d')!
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, FRAME_W, FRAME_H); ctx.drawImage(canvas, 0, 0)
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, FRAME_W, FRAME_H)
+    if (!frameOverlay && frameImg) ctx.drawImage(frameImg, 0, 0, FRAME_W, FRAME_H)
+    if (photoImg) ctx.drawImage(photoImg, pos.x, pos.y, photoImg.width * scale, photoImg.height * scale)
+    if (frameOverlay && frameImg) ctx.drawImage(frameImg, 0, 0, FRAME_W, FRAME_H)
+    textLayers.forEach(t => {
+      const weight = t.bold ? 'bold' : 'normal'
+      const style = t.italic ? 'italic' : 'normal'
+      ctx.font = `${style} ${weight} ${t.fontSize}px Roboto, sans-serif`
+      ctx.fillStyle = t.color; ctx.textBaseline = 'top'
+      ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 3
+      t.text.split('\n').forEach((line, i) => ctx.fillText(line, t.x, t.y + i * lh(t.fontSize)))
+      ctx.shadowBlur = 0
+    })
+    return off
+  }
+
+  function handleDownloadPNG() {
+    const off = buildExportCanvas()
+    const a = document.createElement('a'); a.href = off.toDataURL('image/png'); a.download = 'framed-image.png'; a.click()
+  }
+
+  async function handleDownloadJPG() {
+    setDownloading(true)
+    const off = buildExportCanvas()
     let lo = 0.05, hi = 0.95, bestBlob: Blob | null = null
     for (let i = 0; i < 14; i++) {
       const q = (lo + hi) / 2
@@ -380,13 +386,14 @@ export default function FrameComposerPage() {
             overflow: 'hidden',
             boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
           }}>
-            <canvas ref={canvasRef} width={FRAME_W} height={FRAME_H}
+            <canvas ref={canvasRef} width={FRAME_W * DPR} height={FRAME_H * DPR}
               style={{
                 display: 'block',
                 width: FRAME_W * displayScale,
                 height: FRAME_H * displayScale,
                 cursor: dragging ? 'grabbing' : 'grab',
                 touchAction: 'none',
+                imageRendering: 'auto' as const,
               }}
               onPointerDown={onPointerDown} onPointerMove={onPointerMove}
               onPointerUp={onPointerUp} onPointerLeave={onPointerUp} onWheel={onWheel}
@@ -452,10 +459,11 @@ export default function FrameComposerPage() {
           <div className="p-4 flex-1">
             <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-3">Chữ · Roboto</p>
             <div className="flex gap-1.5 mb-3">
-              <input value={newText} onChange={e => setNewText(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && addText()}
-                placeholder="Nhập chữ rồi Enter..."
-                className="flex-1 text-xs border rounded-lg px-2.5 py-2 outline-none focus:ring-2 focus:ring-violet-200 min-w-0" />
+              <textarea value={newText} onChange={e => setNewText(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addText() } }}
+                placeholder={'Nhập chữ...\nShift+Enter xuống dòng\nEnter để thêm'}
+                rows={3}
+                className="flex-1 text-xs border rounded-lg px-2.5 py-2 outline-none focus:ring-2 focus:ring-violet-200 min-w-0 resize-none leading-relaxed" />
               <button onClick={addText}
                 className="px-2.5 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 shrink-0">
                 <Type size={12} />

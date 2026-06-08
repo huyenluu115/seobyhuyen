@@ -106,14 +106,23 @@ export default function FrameComposerPage() {
       ctx.shadowBlur = 3
       ctx.fillText(t.text, t.x, t.y)
       ctx.shadowBlur = 0
-      // Highlight active
+      // Highlight active + resize handle
       if (t.id === activeText) {
         const w = ctx.measureText(t.text).width
-        ctx.strokeStyle = '#6d28d9'
+        const H = 8
+        ctx.strokeStyle = '#7c3aed'
         ctx.lineWidth = 1.5
         ctx.setLineDash([4, 3])
-        ctx.strokeRect(t.x - 4, t.y - 4, w + 8, t.fontSize + 8)
+        ctx.strokeRect(t.x - 4, t.y - 4, w + 8 + H, t.fontSize + 12)
         ctx.setLineDash([])
+        // Resize handle (right-center)
+        ctx.fillStyle = '#7c3aed'
+        ctx.fillRect(t.x + w + 4, t.y + (t.fontSize - H) / 2, H, H)
+        // Move indicator dots
+        ctx.fillStyle = 'rgba(124,58,237,0.5)'
+        for (let r = 0; r < 2; r++) for (let c = 0; c < 3; c++) {
+          ctx.fillRect(t.x - 2 + c * 4, t.y + r * 5, 2, 2)
+        }
       }
     })
   }, [frameImg, photoImg, scale, pos, textLayers, activeText])
@@ -194,8 +203,31 @@ export default function FrameComposerPage() {
     setActiveText(null)
   }
 
-  // Hit-test: which text layer did the user click?
-  function hitTestText(cx: number, cy: number): string | null {
+  const HANDLE_SIZE = 12
+
+  function getTextMetrics(t: TextLayer) {
+    const canvas = canvasRef.current; if (!canvas) return null
+    const ctx = canvas.getContext('2d'); if (!ctx) return null
+    ctx.font = `${t.italic ? 'italic' : 'normal'} ${t.bold ? 'bold' : 'normal'} ${t.fontSize}px Roboto, sans-serif`
+    return { w: ctx.measureText(t.text).width }
+  }
+
+  // Returns 'resize:{id}' or '{id}' or null
+  function hitTest(cx: number, cy: number): string | null {
+    // Check resize handle of active text first
+    if (activeText) {
+      const t = textLayers.find(x => x.id === activeText)
+      if (t) {
+        const m = getTextMetrics(t)
+        if (m) {
+          const hx = t.x + m.w + 4
+          const hy = t.y + (t.fontSize - HANDLE_SIZE) / 2
+          if (cx >= hx - 4 && cx <= hx + HANDLE_SIZE + 4 && cy >= hy - 4 && cy <= hy + HANDLE_SIZE + 4)
+            return `resize:${t.id}`
+        }
+      }
+    }
+    // Check text body
     const canvas = canvasRef.current; if (!canvas) return null
     const ctx = canvas.getContext('2d'); if (!ctx) return null
     for (let i = textLayers.length - 1; i >= 0; i--) {
@@ -214,12 +246,20 @@ export default function FrameComposerPage() {
     const rect = canvas.getBoundingClientRect()
     const cx = (e.clientX - rect.left) / displayScale
     const cy = (e.clientY - rect.top) / displayScale
-    const hit = hitTestText(cx, cy)
+    const hit = hitTest(cx, cy)
     if (hit) {
-      setActiveText(hit)
-      setDragTarget(hit)
-      const t = textLayers.find(x => x.id === hit)!
-      dragStart.current = { mx: e.clientX, my: e.clientY, px: t.x, py: t.y }
+      if (hit.startsWith('resize:')) {
+        const id = hit.replace('resize:', '')
+        const t = textLayers.find(x => x.id === id)!
+        setDragTarget(hit)
+        dragStart.current = { mx: e.clientX, my: e.clientY, px: t.fontSize, py: 0 }
+      } else {
+        setActiveText(hit)
+        setDragTarget(hit)
+        const t = textLayers.find(x => x.id === hit)!
+        dragStart.current = { mx: e.clientX, my: e.clientY, px: t.x, py: t.y }
+        setFontSize(t.fontSize); setTextColor(t.color); setBold(t.bold); setItalic(t.italic)
+      }
     } else {
       setActiveText(null)
       if (!photoImg) return
@@ -235,6 +275,12 @@ export default function FrameComposerPage() {
     const dy = (e.clientY - dragStart.current.my) / displayScale
     if (dragTarget === 'photo') {
       setPos({ x: dragStart.current.px + dx, y: dragStart.current.py + dy })
+    } else if (dragTarget.startsWith('resize:')) {
+      const id = dragTarget.replace('resize:', '')
+      const rawSize = dragStart.current.px + dx * 0.6
+      const newSize = Math.max(8, Math.min(120, Math.round(rawSize)))
+      setTextLayers(prev => prev.map(t => t.id === id ? { ...t, fontSize: newSize } : t))
+      setFontSize(newSize)
     } else {
       setTextLayers(prev => prev.map(t =>
         t.id === dragTarget ? { ...t, x: dragStart.current.px + dx, y: dragStart.current.py + dy } : t

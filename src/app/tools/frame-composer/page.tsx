@@ -7,7 +7,6 @@ import { Layers, Download, Upload, ZoomIn, ZoomOut, RotateCcw, Loader2, Check, T
 
 const FRAME_W = 650
 const FRAME_H = 371
-const DPR = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1
 
 const PRESET_FRAMES = [
   { id: 'vnce',        label: 'VNCE',           src: '/frames/vnce-frame.png', overlay: true  },
@@ -87,7 +86,6 @@ export default function FrameComposerPage() {
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    ctx.setTransform(DPR, 0, 0, DPR, 0, 0)
     ctx.clearRect(0, 0, FRAME_W, FRAME_H)
     ctx.fillStyle = '#e8e8e8'
     ctx.fillRect(0, 0, FRAME_W, FRAME_H)
@@ -386,14 +384,13 @@ export default function FrameComposerPage() {
             overflow: 'hidden',
             boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
           }}>
-            <canvas ref={canvasRef} width={FRAME_W * DPR} height={FRAME_H * DPR}
+            <canvas ref={canvasRef} width={FRAME_W} height={FRAME_H}
               style={{
                 display: 'block',
                 width: FRAME_W * displayScale,
                 height: FRAME_H * displayScale,
                 cursor: dragging ? 'grabbing' : 'grab',
                 touchAction: 'none',
-                imageRendering: 'auto' as const,
               }}
               onPointerDown={onPointerDown} onPointerMove={onPointerMove}
               onPointerUp={onPointerUp} onPointerLeave={onPointerUp} onWheel={onWheel}

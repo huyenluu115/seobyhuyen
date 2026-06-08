@@ -9,7 +9,9 @@ const FRAME_W = 650
 const FRAME_H = 371
 
 const PRESET_FRAMES = [
-  { id: 'vnce', label: 'VNCE', src: '/frames/vnce-frame.png' },
+  { id: 'vnce',        label: 'VNCE',         src: '/frames/vnce-frame.png' },
+  { id: 'daotao',     label: 'Đào tạo',       src: '/frames/daotao.png' },
+  { id: 'daotao-text', label: 'Đào tạo + text', src: '/frames/daotao-text.png' },
 ]
 
 interface TextLayer {

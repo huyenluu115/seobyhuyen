@@ -68,11 +68,15 @@ export default function FrameComposerPage() {
   useEffect(() => {
     function update() {
       if (!containerRef.current) return
-      setDisplayScale(Math.min(1, containerRef.current.offsetWidth / FRAME_W))
+      const padW = 48, padH = 48
+      const scaleW = (containerRef.current.offsetWidth - padW) / FRAME_W
+      const scaleH = (containerRef.current.offsetHeight - padH) / FRAME_H
+      setDisplayScale(Math.min(scaleW, scaleH))
     }
     update()
-    window.addEventListener('resize', update)
-    return () => window.removeEventListener('resize', update)
+    const ro = new ResizeObserver(update)
+    if (containerRef.current) ro.observe(containerRef.current)
+    return () => ro.disconnect()
   }, [])
 
   const draw = useCallback(() => {
@@ -367,7 +371,7 @@ export default function FrameComposerPage() {
       {/* Body */}
       <div className="flex flex-1 overflow-hidden">
         {/* Canvas area */}
-        <div ref={containerRef} className="flex-1 flex items-center justify-center p-6 overflow-hidden">
+        <div ref={containerRef} className="flex-1 flex items-center justify-center p-6 overflow-hidden" style={{ height: '100%' }}>
           <div style={{
             width: FRAME_W * displayScale,
             height: FRAME_H * displayScale,

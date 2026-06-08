@@ -3,14 +3,24 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { Layers, Download, Upload, ZoomIn, ZoomOut, RotateCcw, Loader2 } from 'lucide-react'
+import { Layers, Download, Upload, ZoomIn, ZoomOut, RotateCcw, Loader2, Check } from 'lucide-react'
 
 const FRAME_W = 650
 const FRAME_H = 371
 
+const PRESET_FRAMES = [
+  {
+    id: 'vnce',
+    label: 'VNCE',
+    src: '/frames/vnce-frame.png',
+    preview: '/frames/vnce-frame.png',
+  },
+]
+
 export default function FrameComposerPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [frameImg, setFrameImg] = useState<HTMLImageElement | null>(null)
+  const [selectedPreset, setSelectedPreset] = useState<string | null>(null)
   const [photoImg, setPhotoImg] = useState<HTMLImageElement | null>(null)
   const [scale, setScale] = useState(1)
   const [pos, setPos] = useState({ x: 0, y: 0 })
@@ -21,7 +31,6 @@ export default function FrameComposerPage() {
   const containerRef = useRef<HTMLDivElement>(null)
   const [displayScale, setDisplayScale] = useState(1)
 
-  // Responsive canvas display scale
   useEffect(() => {
     function update() {
       if (!containerRef.current) return
@@ -38,11 +47,9 @@ export default function FrameComposerPage() {
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-
     ctx.clearRect(0, 0, FRAME_W, FRAME_H)
     ctx.fillStyle = '#e8e8e8'
     ctx.fillRect(0, 0, FRAME_W, FRAME_H)
-
     if (photoImg) {
       ctx.drawImage(photoImg, pos.x, pos.y, photoImg.width * scale, photoImg.height * scale)
     }
@@ -53,7 +60,7 @@ export default function FrameComposerPage() {
 
   useEffect(() => { draw() }, [draw])
 
-  function loadImage(file: File): Promise<HTMLImageElement> {
+  function loadImageFromFile(file: File): Promise<HTMLImageElement> {
     return new Promise((resolve) => {
       const img = new Image()
       img.onload = () => resolve(img)
@@ -61,21 +68,48 @@ export default function FrameComposerPage() {
     })
   }
 
-  async function handleFrame(e: React.ChangeEvent<HTMLInputElement>) {
+  function loadImageFromUrl(url: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      img.onload = () => resolve(img)
+      img.onerror = reject
+      img.src = url
+    })
+  }
+
+  async function handlePresetSelect(preset: typeof PRESET_FRAMES[0]) {
+    if (selectedPreset === preset.id) {
+      setSelectedPreset(null)
+      setFrameImg(null)
+      return
+    }
+    try {
+      const img = await loadImageFromUrl(preset.src)
+      setFrameImg(img)
+      setSelectedPreset(preset.id)
+    } catch {
+      alert('Không tải được khung. Hãy đảm bảo file ảnh đã được đặt vào thư mục public/frames/')
+    }
+  }
+
+  async function handleFrameUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    const img = await loadImage(file)
+    const img = await loadImageFromFile(file)
     setFrameImg(img)
+    setSelectedPreset(null)
   }
 
   async function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    const img = await loadImage(file)
+    const img = await loadImageFromFile(file)
     const s = Math.max(FRAME_W / img.width, FRAME_H / img.height)
     setScale(s)
     setPos({ x: (FRAME_W - img.width * s) / 2, y: (FRAME_H - img.height * s) / 2 })
     setPhotoImg(img)
+    setJpgSize(null)
   }
 
   function toCanvasCoords(clientX: number, clientY: number) {
@@ -111,7 +145,6 @@ export default function FrameComposerPage() {
     const delta = -e.deltaY * 0.001
     setScale(prev => {
       const next = Math.max(0.05, Math.min(10, prev + delta))
-      // Zoom toward cursor
       setPos(p => ({
         x: cx - (cx - p.x) * (next / prev),
         y: cy - (cy - p.y) * (next / prev),
@@ -140,14 +173,12 @@ export default function FrameComposerPage() {
     const canvas = canvasRef.current
     if (!canvas) return
     setDownloading(true)
-    // Offscreen canvas with white background (JPG has no alpha)
     const off = document.createElement('canvas')
     off.width = FRAME_W; off.height = FRAME_H
     const ctx = off.getContext('2d')!
     ctx.fillStyle = '#ffffff'
     ctx.fillRect(0, 0, FRAME_W, FRAME_H)
     ctx.drawImage(canvas, 0, 0)
-    // Binary search: highest quality that stays ≤ 100KB
     let lo = 0.05, hi = 0.95, bestBlob: Blob | null = null
     for (let i = 0; i < 14; i++) {
       const q = (lo + hi) / 2
@@ -199,9 +230,7 @@ export default function FrameComposerPage() {
               onWheel={onWheel}
             />
           </div>
-          {!ready && (
-            <p className="text-xs text-gray-400 text-center">Upload khung và ảnh để bắt đầu</p>
-          )}
+          {!ready && <p className="text-xs text-gray-400 text-center">Chọn khung và upload ảnh để bắt đầu</p>}
           {ready && (
             <p className="text-xs text-gray-400 text-center">
               Kéo để di chuyển ảnh · Cuộn chuột để zoom · {Math.round(scale * 100)}%
@@ -210,38 +239,76 @@ export default function FrameComposerPage() {
         </div>
 
         {/* Controls */}
-        <div className="space-y-4 w-full lg:w-56 shrink-0">
-          {/* Upload frame */}
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-2">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">1. Khung (PNG)</p>
+        <div className="space-y-4 w-full lg:w-60 shrink-0">
+
+          {/* Step 1: Frame */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">1. Chọn khung</p>
+
+            {/* Preset frames */}
+            <div className="space-y-1.5">
+              <p className="text-xs text-gray-500 font-medium">Khung có sẵn:</p>
+              <div className="flex flex-wrap gap-2">
+                {PRESET_FRAMES.map(preset => (
+                  <button
+                    key={preset.id}
+                    onClick={() => handlePresetSelect(preset)}
+                    className={cn(
+                      'relative flex items-center gap-2 px-3 py-2 rounded-xl border-2 text-xs font-medium transition-all',
+                      selectedPreset === preset.id
+                        ? 'border-violet-500 bg-violet-50 text-violet-700'
+                        : 'border-gray-200 hover:border-violet-300 text-gray-600 hover:bg-violet-50'
+                    )}
+                  >
+                    {selectedPreset === preset.id && (
+                      <Check size={12} className="text-violet-600" />
+                    )}
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Divider */}
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-px bg-gray-100" />
+              <span className="text-[11px] text-gray-400">hoặc</span>
+              <div className="flex-1 h-px bg-gray-100" />
+            </div>
+
+            {/* Upload custom frame */}
             <label className={cn(
-              'flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-dashed cursor-pointer transition-colors',
-              frameImg ? 'border-violet-300 bg-violet-50' : 'border-gray-200 hover:border-violet-300 hover:bg-violet-50'
+              'flex items-center gap-2 p-3 rounded-xl border-2 border-dashed cursor-pointer transition-colors',
+              frameImg && !selectedPreset
+                ? 'border-violet-300 bg-violet-50'
+                : 'border-gray-200 hover:border-violet-300 hover:bg-violet-50'
             )}>
-              <Upload size={18} className={frameImg ? 'text-violet-500' : 'text-gray-400'} />
-              <span className="text-xs text-center text-gray-500 leading-relaxed">
-                {frameImg ? <span className="text-violet-600 font-semibold">✓ Đã tải khung</span> : 'PNG trong suốt\n(nền alpha)'}
+              <Upload size={14} className={frameImg && !selectedPreset ? 'text-violet-500' : 'text-gray-400'} />
+              <span className="text-xs text-gray-500">
+                {frameImg && !selectedPreset
+                  ? <span className="text-violet-600 font-semibold">✓ Đã upload khung</span>
+                  : 'Upload khung của bạn (PNG)'}
               </span>
-              <input type="file" accept="image/png,image/*" className="hidden" onChange={handleFrame} />
+              <input type="file" accept="image/png,image/*" className="hidden" onChange={handleFrameUpload} />
             </label>
           </div>
 
-          {/* Upload photo */}
+          {/* Step 2: Photo */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-2">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">2. Ảnh của bạn</p>
             <label className={cn(
-              'flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-dashed cursor-pointer transition-colors',
+              'flex items-center gap-2 p-3 rounded-xl border-2 border-dashed cursor-pointer transition-colors',
               photoImg ? 'border-violet-300 bg-violet-50' : 'border-gray-200 hover:border-violet-300 hover:bg-violet-50'
             )}>
-              <Upload size={18} className={photoImg ? 'text-violet-500' : 'text-gray-400'} />
-              <span className="text-xs text-center text-gray-500">
+              <Upload size={14} className={photoImg ? 'text-violet-500' : 'text-gray-400'} />
+              <span className="text-xs text-gray-500">
                 {photoImg ? <span className="text-violet-600 font-semibold">✓ Đã tải ảnh</span> : 'JPG, PNG, WebP'}
               </span>
               <input type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
             </label>
           </div>
 
-          {/* Scale */}
+          {/* Zoom controls */}
           {photoImg && (
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">Zoom ảnh</p>
@@ -272,9 +339,7 @@ export default function FrameComposerPage() {
               {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
               {downloading ? 'Đang nén...' : 'Tải JPG < 100KB'}
             </Button>
-            {jpgSize && (
-              <p className="text-xs text-center text-gray-500">✓ {jpgSize}KB</p>
-            )}
+            {jpgSize && <p className="text-xs text-center text-gray-500">✓ {jpgSize}KB</p>}
             <Button onClick={handleDownloadPNG} disabled={!ready} variant="outline"
               className="w-full gap-2 text-gray-600">
               <Download size={14} />Tải PNG (gốc)

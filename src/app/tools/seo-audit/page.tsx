@@ -21,7 +21,7 @@ interface AuditData {
   headings: { level: number; text: string }[]
   schemas: { type: string; raw: object }[]
   links: { internal: number; external: number; dofollow: number; nofollow: number; ugc: number; sponsored: number }
-  images: { total: number; missingAlt: number }
+  images: { total: number; missingAlt: number; missingAltImgs: string[] }
   wordCount: number; sentenceCount: number; avgWPS: number; fleschScore: number; readLabel: string
   topUni: { text: string; count: number; density: string }[]
   topBi: { text: string; count: number; density: string }[]
@@ -131,9 +131,12 @@ function buildIssues(data: AuditData, domain: string): Issue[] {
 
   // Images alt
   if (data.images.missingAlt > 0) {
+    const imgList = data.images.missingAltImgs.length > 0
+      ? `\n\nCác ảnh thiếu alt:\n${data.images.missingAltImgs.map(s => `• ${s}`).join('\n')}${data.images.missingAlt > data.images.missingAltImgs.length ? `\n• ... và ${data.images.missingAlt - data.images.missingAltImgs.length} ảnh khác` : ''}`
+      : ''
     list.push({ id: 'alt-missing', severity: 'warning', category: 'Hình ảnh', title: `${data.images.missingAlt} ảnh thiếu thuộc tính alt`,
-      detail: 'Alt text giúp Google Image Search và người dùng khiếm thị. Ảnh không có alt bỏ lỡ traffic từ Google Images.',
-      fix: `<!-- Thay vì: -->\n<img src="anh.jpg">\n\n<!-- Dùng: -->\n<img src="anh.jpg" alt="Mô tả nội dung ảnh chứa từ khóa liên quan">`,
+      detail: `Alt text giúp Google Image Search và người dùng khiếm thị. Ảnh không có alt bỏ lỡ traffic từ Google Images.${imgList}`,
+      fix: data.images.missingAltImgs.slice(0, 3).map(s => `<img src="${s}" alt="Mô tả nội dung ảnh chứa từ khóa">`).join('\n') || `<img src="anh.jpg" alt="Mô tả nội dung ảnh chứa từ khóa liên quan">`,
       docsUrl: 'https://developers.google.com/search/docs/appearance/google-images', docsLabel: 'Google: Image best practices' })
   }
 

@@ -96,9 +96,9 @@ export async function POST(req: NextRequest) {
   }
   if (!html) return NextResponse.json({ error: 'Không nhận được nội dung' }, { status: 500 })
 
-  // Meta
-  const title = (html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || '').trim()
-  const desc = meta(html, 'description') || meta(html, 'og:description')
+  // Meta — decode HTML entities (&#226; → â, etc.)
+  const title = decode((html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || '').trim())
+  const desc = decode(meta(html, 'description') || meta(html, 'og:description'))
   const canonical = html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i)?.[1]?.trim() || ''
   const viewport = /<meta[^>]+name=["']viewport["']/i.test(html)
   const metaRobots = meta(html, 'robots')
@@ -146,12 +146,21 @@ export async function POST(req: NextRequest) {
     if (!rel.includes('nofollow') && !rel.includes('ugc') && !rel.includes('sponsored')) dofollow++
   }
 
-  // Images
+  // Images — collect src of imgs missing alt for detailed reporting
   const imgs = [...html.matchAll(/<img[^>]+>/gi)]
-  const missingAlt = imgs.filter(m => {
-    const a = m[0].match(/alt=["']([^"']*)["']/i)
-    return !a || !a[1].trim()
-  }).length
+  const missingAltImgs = imgs
+    .filter(m => {
+      const a = m[0].match(/alt=["']([^"']*)["']/i)
+      return !a || !a[1].trim()
+    })
+    .map(m => {
+      const src = m[0].match(/src=["']([^"']+)["']/i)?.[1] || ''
+      try { return src.startsWith('http') ? new URL(src).pathname.split('/').pop() || src : src.split('/').pop() || src }
+      catch { return src }
+    })
+    .filter(Boolean)
+    .slice(0, 10)
+  const missingAlt = missingAltImgs.length
 
   // Content analysis
   const bt = bodyText(html)
@@ -176,7 +185,7 @@ export async function POST(req: NextRequest) {
     headings,
     schemas,
     links: { internal, external, dofollow, nofollow, ugc, sponsored },
-    images: { total: imgs.length, missingAlt },
+    images: { total: imgs.length, missingAlt, missingAltImgs },
     wordCount, sentenceCount, avgWPS, fleschScore, readLabel,
     topUni: uni, topBi: bi, topTri: tri,
   })

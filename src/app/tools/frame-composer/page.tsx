@@ -294,158 +294,163 @@ export default function FrameComposerPage() {
   const ready = !!(frameImg || photoImg || textLayers.length > 0)
 
   return (
-    <div className="p-6 md:p-8 pb-16 min-h-screen" style={{ background: '#f8f9fb' }}>
-      <div className="mb-6">
-        <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-          <Layers size={20} className="text-violet-500" />Frame Composer
-        </h1>
-        <p className="text-sm text-gray-500 mt-0.5">Ghép ảnh vào khung, thêm chữ — 650×371px</p>
+    <div className="flex h-[calc(100vh-0px)] flex-col" style={{ background: '#f0f0f2' }}>
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-3 bg-white border-b border-gray-200 shrink-0">
+        <div className="flex items-center gap-2">
+          <Layers size={18} className="text-violet-500" />
+          <span className="font-semibold text-gray-800 text-sm">Frame Composer</span>
+          <span className="text-gray-300 text-xs">|</span>
+          <span className="text-gray-400 text-xs">650 × 371 px</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {ready && <span className="text-xs text-gray-400">{Math.round(scale * 100)}%</span>}
+          <Button onClick={handleDownloadJPG} disabled={!ready || downloading} size="sm"
+            className="gap-1.5 bg-violet-600 hover:bg-violet-700 h-8 text-xs">
+            {downloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+            {downloading ? 'Đang nén...' : 'Tải JPG'}
+          </Button>
+          <Button onClick={handleDownloadPNG} disabled={!ready} size="sm" variant="outline"
+            className="gap-1.5 h-8 text-xs text-gray-600">
+            <Download size={12} />PNG
+          </Button>
+          {jpgSize && <span className="text-xs text-green-600 font-medium">✓ {jpgSize}KB</span>}
+        </div>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-6 items-start max-w-5xl">
-        {/* Canvas */}
-        <div ref={containerRef} className="flex-1 min-w-0 space-y-2">
-          <div className="overflow-hidden rounded-2xl border border-gray-200 shadow-sm bg-white"
-            style={{ width: '100%', height: FRAME_H * displayScale }}>
+      {/* Body */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Canvas area */}
+        <div ref={containerRef} className="flex-1 flex items-center justify-center p-6 overflow-hidden">
+          <div style={{
+            width: FRAME_W * displayScale,
+            height: FRAME_H * displayScale,
+            flexShrink: 0,
+            borderRadius: 12,
+            overflow: 'hidden',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+          }}>
             <canvas ref={canvasRef} width={FRAME_W} height={FRAME_H}
               style={{
-                display: 'block', width: FRAME_W * displayScale, height: FRAME_H * displayScale,
-                cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none',
+                display: 'block',
+                width: FRAME_W * displayScale,
+                height: FRAME_H * displayScale,
+                cursor: dragging ? 'grabbing' : 'grab',
+                touchAction: 'none',
               }}
               onPointerDown={onPointerDown} onPointerMove={onPointerMove}
               onPointerUp={onPointerUp} onPointerLeave={onPointerUp} onWheel={onWheel}
             />
           </div>
-          <p className="text-xs text-gray-400 text-center">
-            {ready ? `Kéo ảnh/chữ để di chuyển · Cuộn chuột để zoom ảnh · ${Math.round(scale * 100)}%` : 'Chọn khung và upload ảnh để bắt đầu'}
-          </p>
         </div>
 
-        {/* Controls */}
-        <div className="space-y-3 w-full lg:w-64 shrink-0">
+        {/* Right panel */}
+        <div className="w-64 shrink-0 bg-white border-l border-gray-200 flex flex-col overflow-y-auto">
 
           {/* 1. Frame */}
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">1. Khung</p>
-            <div className="flex flex-wrap gap-2">
+          <div className="p-4 border-b border-gray-100">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-3">Khung</p>
+            <div className="flex flex-wrap gap-1.5 mb-3">
               {PRESET_FRAMES.map(p => (
                 <button key={p.id} onClick={() => handlePresetSelect(p)}
-                  className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg border-2 text-xs font-medium transition-all',
-                    selectedPreset === p.id ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-gray-200 hover:border-violet-300 text-gray-600')}>
-                  {selectedPreset === p.id && <Check size={11} />}{p.label}
+                  className={cn('flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all',
+                    selectedPreset === p.id
+                      ? 'border-violet-500 bg-violet-50 text-violet-700'
+                      : 'border-gray-200 hover:border-violet-300 text-gray-600 bg-gray-50')}>
+                  {selectedPreset === p.id && <Check size={10} />}{p.label}
                 </button>
               ))}
             </div>
-            <div className="flex items-center gap-2"><div className="flex-1 h-px bg-gray-100" /><span className="text-[11px] text-gray-400">hoặc</span><div className="flex-1 h-px bg-gray-100" /></div>
-            <label className={cn('flex items-center gap-2 p-2.5 rounded-xl border-2 border-dashed cursor-pointer transition-colors text-xs',
-              frameImg && !selectedPreset ? 'border-violet-300 bg-violet-50 text-violet-600' : 'border-gray-200 hover:border-violet-300 text-gray-500')}>
-              <Upload size={13} />
-              {frameImg && !selectedPreset ? '✓ Đã upload khung' : 'Upload khung (PNG)'}
+            <label className={cn(
+              'flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed cursor-pointer transition-colors text-xs w-full',
+              frameImg && !selectedPreset ? 'border-violet-400 bg-violet-50 text-violet-600' : 'border-gray-300 text-gray-400 hover:border-violet-300 hover:text-violet-500'
+            )}>
+              <Upload size={12} />
+              {frameImg && !selectedPreset ? '✓ Đã upload khung' : 'Upload khung khác'}
               <input type="file" accept="image/png,image/*" className="hidden" onChange={handleFrameUpload} />
             </label>
           </div>
 
           {/* 2. Photo */}
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-2">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">2. Ảnh</p>
-            <label className={cn('flex items-center gap-2 p-2.5 rounded-xl border-2 border-dashed cursor-pointer transition-colors text-xs',
-              photoImg ? 'border-violet-300 bg-violet-50 text-violet-600' : 'border-gray-200 hover:border-violet-300 text-gray-500')}>
-              <Upload size={13} />
-              {photoImg ? '✓ Đã tải ảnh' : 'JPG, PNG, WebP'}
+          <div className="p-4 border-b border-gray-100">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-3">Ảnh</p>
+            <label className={cn(
+              'flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed cursor-pointer transition-colors text-xs w-full mb-2',
+              photoImg ? 'border-violet-400 bg-violet-50 text-violet-600' : 'border-gray-300 text-gray-400 hover:border-violet-300 hover:text-violet-500'
+            )}>
+              <Upload size={12} />
+              {photoImg ? '✓ Ảnh đã tải' : 'Upload ảnh (JPG/PNG)'}
               <input type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
             </label>
             {photoImg && (
-              <div className="flex items-center gap-1.5 pt-1">
-                <button onClick={() => setScale(s => Math.max(0.05, s - 0.05))} className="p-1 rounded hover:bg-gray-100"><ZoomOut size={13} className="text-gray-500" /></button>
-                <input type="range" min={0.05} max={10} step={0.01} value={scale} onChange={e => setScale(parseFloat(e.target.value))} className="flex-1 accent-violet-500" />
-                <button onClick={() => setScale(s => Math.min(10, s + 0.05))} className="p-1 rounded hover:bg-gray-100"><ZoomIn size={13} className="text-gray-500" /></button>
-                <button onClick={handleReset} className="p-1 rounded hover:bg-gray-100"><RotateCcw size={13} className="text-gray-500" /></button>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setScale(s => Math.max(0.05, s - 0.05))} className="p-1 rounded hover:bg-gray-100"><ZoomOut size={12} className="text-gray-500" /></button>
+                  <input type="range" min={0.05} max={10} step={0.01} value={scale}
+                    onChange={e => setScale(parseFloat(e.target.value))} className="flex-1 accent-violet-500 h-1" />
+                  <button onClick={() => setScale(s => Math.min(10, s + 0.05))} className="p-1 rounded hover:bg-gray-100"><ZoomIn size={12} className="text-gray-500" /></button>
+                </div>
+                <button onClick={handleReset}
+                  className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-violet-600 transition-colors">
+                  <RotateCcw size={10} />Căn giữa
+                </button>
               </div>
             )}
           </div>
 
           {/* 3. Text */}
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">3. Chữ (Roboto)</p>
-
-            {/* Add text */}
-            <div className="flex gap-2">
+          <div className="p-4 flex-1">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-3">Chữ · Roboto</p>
+            <div className="flex gap-1.5 mb-3">
               <input value={newText} onChange={e => setNewText(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && addText()}
-                placeholder="Nhập chữ..."
-                className="flex-1 text-xs border rounded-lg px-2.5 py-2 outline-none focus:ring-2 focus:ring-violet-200" />
+                placeholder="Nhập chữ rồi Enter..."
+                className="flex-1 text-xs border rounded-lg px-2.5 py-2 outline-none focus:ring-2 focus:ring-violet-200 min-w-0" />
               <button onClick={addText}
-                className="px-3 py-2 bg-violet-600 text-white rounded-lg text-xs font-medium hover:bg-violet-700 flex items-center gap-1">
-                <Type size={12} />Thêm
+                className="px-2.5 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 shrink-0">
+                <Type size={12} />
               </button>
             </div>
 
-            {/* Style controls for new text */}
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <p className="text-[10px] text-gray-400 mb-1">Cỡ chữ: {fontSize}px</p>
+            <div className="space-y-2 mb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-gray-400 w-12 shrink-0">Cỡ {fontSize}px</span>
                 <input type="range" min={10} max={60} value={fontSize}
                   onChange={e => { setFontSize(+e.target.value); updateActiveText({ fontSize: +e.target.value }) }}
-                  className="w-full accent-violet-500" />
+                  className="flex-1 accent-violet-500 h-1" />
               </div>
-              <div>
-                <p className="text-[10px] text-gray-400 mb-1">Màu chữ</p>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-gray-400 w-12 shrink-0">Màu</span>
                 <input type="color" value={textColor}
                   onChange={e => { setTextColor(e.target.value); updateActiveText({ color: e.target.value }) }}
-                  className="w-full h-8 rounded cursor-pointer border border-gray-200" />
+                  className="w-8 h-6 rounded cursor-pointer border border-gray-200 p-0" />
+                <button onClick={() => { setBold(b => !b); updateActiveText({ bold: !bold }) }}
+                  className={cn('px-2 py-1 rounded text-xs font-bold border transition-colors',
+                    bold ? 'bg-violet-100 border-violet-400 text-violet-700' : 'border-gray-200 text-gray-500')}>B</button>
+                <button onClick={() => { setItalic(i => !i); updateActiveText({ italic: !italic }) }}
+                  className={cn('px-2 py-1 rounded text-xs italic border transition-colors',
+                    italic ? 'bg-violet-100 border-violet-400 text-violet-700' : 'border-gray-200 text-gray-500')}>I</button>
               </div>
             </div>
 
-            <div className="flex gap-2">
-              <button onClick={() => { setBold(b => !b); updateActiveText({ bold: !bold }) }}
-                className={cn('flex-1 py-1.5 rounded-lg text-xs font-bold border transition-colors',
-                  bold ? 'bg-violet-100 border-violet-400 text-violet-700' : 'border-gray-200 text-gray-500 hover:bg-gray-50')}>
-                <Bold size={13} className="inline" /> Bold
-              </button>
-              <button onClick={() => { setItalic(i => !i); updateActiveText({ italic: !italic }) }}
-                className={cn('flex-1 py-1.5 rounded-lg text-xs border transition-colors italic',
-                  italic ? 'bg-violet-100 border-violet-400 text-violet-700' : 'border-gray-200 text-gray-500 hover:bg-gray-50')}>
-                <Italic size={13} className="inline" /> Italic
-              </button>
-            </div>
-
-            {/* Text layers list */}
             {textLayers.length > 0 && (
-              <div className="space-y-1 pt-1 border-t border-gray-100">
-                <p className="text-[10px] text-gray-400">Click để chọn · kéo trên canvas để di chuyển</p>
+              <div className="space-y-1 border-t border-gray-100 pt-2">
                 {textLayers.map(t => (
-                  <div key={t.id}
-                    onClick={() => { setActiveText(t.id); setFontSize(t.fontSize); setTextColor(t.color); setBold(t.bold); setItalic(t.italic) }}
-                    className={cn('flex items-center gap-2 px-2.5 py-1.5 rounded-lg cursor-pointer text-xs transition-colors',
+                  <div key={t.id} onClick={() => { setActiveText(t.id); setFontSize(t.fontSize); setTextColor(t.color); setBold(t.bold); setItalic(t.italic) }}
+                    className={cn('flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer text-xs transition-colors group',
                       activeText === t.id ? 'bg-violet-50 border border-violet-200' : 'hover:bg-gray-50 border border-transparent')}>
-                    <span className="flex-1 truncate font-medium" style={{ color: t.color === '#ffffff' ? '#6b7280' : t.color }}>{t.text}</span>
-                    <span className="text-gray-400 text-[10px]">{t.fontSize}px</span>
+                    <div className="w-2.5 h-2.5 rounded-full shrink-0 border border-gray-200" style={{ background: t.color }} />
+                    <span className="flex-1 truncate text-gray-700">{t.text}</span>
+                    <span className="text-gray-300 text-[10px] shrink-0">{t.fontSize}px</span>
                     {activeText === t.id && (
                       <button onClick={e => { e.stopPropagation(); deleteActiveText() }}
-                        className="text-red-400 hover:text-red-600 text-[10px] px-1">✕</button>
+                        className="text-red-400 hover:text-red-600 text-[10px] shrink-0">✕</button>
                     )}
                   </div>
                 ))}
+                <p className="text-[10px] text-gray-400 pt-1">Kéo chữ trên canvas để đặt vị trí</p>
               </div>
             )}
-
-            {activeLayer && (
-              <p className="text-[10px] text-violet-600 bg-violet-50 rounded px-2 py-1">
-                Đang chỉnh: <strong>{activeLayer.text}</strong> — kéo trên canvas để đặt vị trí
-              </p>
-            )}
-          </div>
-
-          {/* Download */}
-          <div className="space-y-2">
-            <Button onClick={handleDownloadJPG} disabled={!ready || downloading} className="w-full gap-2 bg-violet-600 hover:bg-violet-700">
-              {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-              {downloading ? 'Đang nén...' : 'Tải JPG < 100KB'}
-            </Button>
-            {jpgSize && <p className="text-xs text-center text-gray-500">✓ {jpgSize}KB</p>}
-            <Button onClick={handleDownloadPNG} disabled={!ready} variant="outline" className="w-full gap-2 text-gray-600">
-              <Download size={14} />Tải PNG (gốc)
-            </Button>
           </div>
         </div>
       </div>

@@ -9,9 +9,9 @@ const FRAME_W = 650
 const FRAME_H = 371
 
 const PRESET_FRAMES = [
-  { id: 'vnce',        label: 'VNCE',           src: '/frames/vnce-frame.png', overlay: true  },
-  { id: 'daotao',     label: 'Đào tạo',         src: '/frames/daotao.png',     overlay: false },
-  { id: 'daotao-text', label: 'Đào tạo + text', src: '/frames/daotao-text.png', overlay: false },
+  { id: 'vnce',         label: 'VNCE',           src: '/frames/vnce-frame.png'   },
+  { id: 'daotao',      label: 'Đào tạo',         src: '/frames/daotao.png'       },
+  { id: 'daotao-text', label: 'Đào tạo + text',  src: '/frames/daotao-text.png'  },
 ]
 
 interface TextLayer {
@@ -38,7 +38,6 @@ function loadFont(): Promise<void> {
 export default function FrameComposerPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [frameImg, setFrameImg] = useState<HTMLImageElement | null>(null)
-  const [frameOverlay, setFrameOverlay] = useState(true) // true=frame on top, false=frame as background
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null)
   const [photoImg, setPhotoImg] = useState<HTMLImageElement | null>(null)
   const [scale, setScale] = useState(1)
@@ -89,9 +88,8 @@ export default function FrameComposerPage() {
     ctx.clearRect(0, 0, FRAME_W, FRAME_H)
     ctx.fillStyle = '#e8e8e8'
     ctx.fillRect(0, 0, FRAME_W, FRAME_H)
-    if (!frameOverlay && frameImg) ctx.drawImage(frameImg, 0, 0, FRAME_W, FRAME_H)
     if (photoImg) ctx.drawImage(photoImg, pos.x, pos.y, photoImg.width * scale, photoImg.height * scale)
-    if (frameOverlay && frameImg) ctx.drawImage(frameImg, 0, 0, FRAME_W, FRAME_H)
+    if (frameImg) ctx.drawImage(frameImg, 0, 0, FRAME_W, FRAME_H)
     textLayers.forEach(t => {
       const weight = t.bold ? 'bold' : 'normal'
       const style = t.italic ? 'italic' : 'normal'
@@ -116,7 +114,7 @@ export default function FrameComposerPage() {
         ctx.fillRect(t.x + maxW + 8, t.y + (totalH - H) / 2, H, H)
       }
     })
-  }, [frameImg, frameOverlay, photoImg, scale, pos, textLayers, activeText])
+  }, [frameImg, photoImg, scale, pos, textLayers, activeText])
 
   useEffect(() => { draw() }, [draw, fontReady])
 
@@ -143,23 +141,13 @@ export default function FrameComposerPage() {
     try {
       const img = await loadImageFromUrl(preset.src)
       setFrameImg(img)
-      setFrameOverlay(preset.overlay)
       setSelectedPreset(preset.id)
     } catch { alert('Không tải được khung. Hãy đảm bảo file ảnh đã được đặt vào thư mục public/frames/') }
   }
 
   async function handleFrameUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return
-    const img = await loadImageFromFile(file)
-    // Auto-detect: check if image has transparency by drawing to offscreen canvas
-    const off = document.createElement('canvas')
-    off.width = 10; off.height = 10
-    const ctx = off.getContext('2d')!
-    ctx.drawImage(img, 0, 0, 10, 10)
-    const px = ctx.getImageData(0, 0, 10, 10).data
-    const hasAlpha = Array.from(px).some((v, i) => i % 4 === 3 && v < 255)
-    setFrameImg(img)
-    setFrameOverlay(hasAlpha)
+    setFrameImg(await loadImageFromFile(file))
     setSelectedPreset(null)
   }
 
@@ -308,9 +296,8 @@ export default function FrameComposerPage() {
     off.width = FRAME_W; off.height = FRAME_H
     const ctx = off.getContext('2d')!
     ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, FRAME_W, FRAME_H)
-    if (!frameOverlay && frameImg) ctx.drawImage(frameImg, 0, 0, FRAME_W, FRAME_H)
     if (photoImg) ctx.drawImage(photoImg, pos.x, pos.y, photoImg.width * scale, photoImg.height * scale)
-    if (frameOverlay && frameImg) ctx.drawImage(frameImg, 0, 0, FRAME_W, FRAME_H)
+    if (frameImg) ctx.drawImage(frameImg, 0, 0, FRAME_W, FRAME_H)
     textLayers.forEach(t => {
       const weight = t.bold ? 'bold' : 'normal'
       const style = t.italic ? 'italic' : 'normal'

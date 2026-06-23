@@ -24,22 +24,20 @@ const TEXT_FIELDS: Array<{ idx: number; label: string }> = [
   { idx: 15, label: 'Mô tả công việc chi tiết' },
 ]
 
-// native SVG dimensions from viewBox
+// Only ảnh thứ 2 và 3 — banner (idx 0) removed from controls per request
+const IMAGE_META = [
+  { idx: 1, label: 'Ảnh thứ 2', size: '626 × 417', w: 626, h: 417 },
+  { idx: 2, label: 'Ảnh thứ 3', size: '725 × 489', w: 725,  h: 489 },
+]
+
 const SVG_W = 1596.17
 const SVG_H = 2413.95
-
-// original image element natural sizes
-const IMAGE_META = [
-  { idx: 0, label: 'Ảnh banner chính', size: '1280 × 625', w: 1280, h: 625 },
-  { idx: 1, label: 'Ảnh thứ 2',        size: '626 × 417',  w: 626,  h: 417 },
-  { idx: 2, label: 'Ảnh thứ 3',        size: '725 × 489',  w: 725,  h: 489 },
-]
 
 interface ImgTransform { tx: number; ty: number; sx: number; sy: number }
 
 function parseTransform(str: string): ImgTransform {
-  const t = str.match(/translate\(\s*([\d.+-]+)[,\s]+([\d.+-]+)\s*\)/)
-  const s = str.match(/scale\(\s*([\d.+-]+)(?:[,\s]+([\d.+-]+))?\s*\)/)
+  const t = str.match(/translate\(\s*([-\d.]+)[,\s]+([-\d.]+)\s*\)/)
+  const s = str.match(/scale\(\s*([-\d.]+)(?:[,\s]+([-\d.]+))?\s*\)/)
   return {
     tx: t ? parseFloat(t[1]) : 0,
     ty: t ? parseFloat(t[2]) : 0,
@@ -53,16 +51,14 @@ function buildTransform({ tx, ty, sx, sy }: ImgTransform) {
 }
 
 function extractLines(textEl: Element): string {
-  const tspans = Array.from(textEl.querySelectorAll('tspan'))
   const yMap = new Map<string, string>()
-  tspans.forEach(ts => {
+  textEl.querySelectorAll('tspan').forEach(ts => {
     const y = ts.getAttribute('y') ?? '0'
     yMap.set(y, (yMap.get(y) ?? '') + (ts.textContent ?? ''))
   })
   return Array.from(yMap.entries())
     .sort((a, b) => parseFloat(a[0]) - parseFloat(b[0]))
-    .map(([, t]) => t.trim())
-    .join('\n')
+    .map(([, t]) => t.trim()).join('\n')
 }
 
 function applyLines(textEl: Element, newText: string) {
@@ -79,7 +75,8 @@ function applyLines(textEl: Element, newText: string) {
   tspans.forEach(ts => ts.remove())
   const lines = newText.split('\n')
   yGroups.forEach((g, i) => {
-    const ts = textEl.ownerDocument!.createElementNS('http://www.w3.org/2000/svg', 'tspan')
+    const ns = 'http://www.w3.org/2000/svg'
+    const ts = (textEl.ownerDocument ?? document).createElementNS(ns, 'tspan')
     ts.setAttribute('x', g.x); ts.setAttribute('y', g.y)
     if (g.cls) ts.setAttribute('class', g.cls)
     ts.textContent = lines[i] ?? ''
@@ -93,7 +90,6 @@ function getSvgString(doc: Document): string {
   return new XMLSerializer().serializeToString(doc)
 }
 
-// Slider row component
 function SliderRow({ label, value, min, max, step, onChange }: {
   label: string; value: number; min: number; max: number; step: number
   onChange: (v: number) => void
@@ -104,12 +100,13 @@ function SliderRow({ label, value, min, max, step, onChange }: {
       <input type="range" min={min} max={max} step={step} value={value}
         onChange={e => onChange(parseFloat(e.target.value))}
         className="flex-1 h-1 accent-violet-500" />
-      <span className="text-[10px] text-gray-500 w-10 text-right shrink-0 font-mono">{value.toFixed(2)}</span>
+      <span className="text-[10px] font-mono text-gray-500 w-12 text-right shrink-0">{value.toFixed(2)}</span>
     </div>
   )
 }
 
 export default function FlyerEditorPage() {
+  // Prevent outer layout from scrolling
   useEffect(() => {
     const prev = document.documentElement.style.overflow
     document.documentElement.style.overflow = 'hidden'
@@ -121,22 +118,83 @@ export default function FlyerEditorPage() {
   const [textValues, setTextValues] = useState<Record<number, string>>({})
   const [imgReplaced, setImgReplaced] = useState<Record<number, boolean>>({})
   const [imgTransforms, setImgTransforms] = useState<Record<number, ImgTransform>>({})
-  const [originalTransforms, setOriginalTransforms] = useState<Record<number, ImgTransform>>({})
-  const [expandedImg, setExpandedImg] = useState<number | null>(1) // default open img 1
-  const [activeSection, setActiveSection] = useState<'text' | 'images'>('images') // default images
-  const [previewSrc, setPreviewSrc] = useState('')
+  const [origTransforms, setOrigTransforms] = useState<Record<number, ImgTransform>>({})
+  const [expandedImg, setExpandedImg] = useState<number | null>(1)
+  const [activeSection, setActiveSection] = useState<'text' | 'images'>('images')
   const [dlOpen, setDlOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
-  const svgDocRef = useRef<Document | null>(null)
-  const blobRef = useRef('')
+  const [draggingIdx, setDraggingIdx] = useState<number | null>(null)
 
-  function updatePreview(doc: Document) {
-    const str = getSvgString(doc)
-    const blob = new Blob([str], { type: 'image/svg+xml' })
-    const url = URL.createObjectURL(blob)
-    if (blobRef.current) URL.revokeObjectURL(blobRef.current)
-    blobRef.current = url
-    setPreviewSrc(url)
+  const svgDocRef = useRef<Document | null>(null)
+  const previewRef = useRef<HTMLDivElement>(null)
+  // Live reference to the imported SVG element for direct patching
+  const liveSvgRef = useRef<SVGSVGElement | null>(null)
+
+  // Mount SVG inline via importNode — preserves namespaces (xlink:href renders correctly)
+  function mountSvg(doc: Document) {
+    if (!previewRef.current) return
+    previewRef.current.innerHTML = ''
+    const svgEl = document.importNode(doc.documentElement, true) as unknown as SVGSVGElement
+    svgEl.style.cssText = [
+      'width:100%',
+      'max-width:820px',
+      'height:auto',
+      'display:block',
+      'margin:0 auto',
+      'border-radius:16px',
+      'box-shadow:0 20px 60px rgba(0,0,0,.2)',
+    ].join(';')
+    previewRef.current.appendChild(svgEl)
+    liveSvgRef.current = svgEl
+    attachDragHandlers(svgEl)
+  }
+
+  function attachDragHandlers(svgEl: SVGSVGElement) {
+    svgEl.querySelectorAll('image').forEach((el, rawIdx) => {
+      // Only attach drag to images that are in the controls panel (idx 1 and 2)
+      if (rawIdx === 0) return
+
+      el.style.cursor = 'grab'
+      let startMX = 0, startMY = 0, startTx = 0, startTy = 0
+
+      el.addEventListener('pointerdown', (e: Event) => {
+        const pe = e as PointerEvent
+        pe.preventDefault(); pe.stopPropagation()
+        el.setPointerCapture(pe.pointerId)
+        el.style.cursor = 'grabbing'
+        startMX = pe.clientX; startMY = pe.clientY
+        const t = parseTransform(el.getAttribute('transform') ?? '')
+        startTx = t.tx; startTy = t.ty
+        setDraggingIdx(rawIdx)
+      })
+
+      el.addEventListener('pointermove', (e: Event) => {
+        const pe = e as PointerEvent
+        if (!el.hasPointerCapture(pe.pointerId)) return
+        const rect = svgEl.getBoundingClientRect()
+        const vb = svgEl.viewBox.baseVal
+        const scX = vb.width / rect.width
+        const scY = vb.height / rect.height
+        const newTx = startTx + (pe.clientX - startMX) * scX
+        const newTy = startTy + (pe.clientY - startMY) * scY
+        const cur = parseTransform(el.getAttribute('transform') ?? '')
+        const str = buildTransform({ ...cur, tx: newTx, ty: newTy })
+        // Patch preview directly (no re-render)
+        el.setAttribute('transform', str)
+        // Keep svgDoc in sync for download
+        svgDocRef.current?.querySelectorAll('image')[rawIdx]?.setAttribute('transform', str)
+      })
+
+      el.addEventListener('pointerup', (e: Event) => {
+        const pe = e as PointerEvent
+        if (!el.hasPointerCapture(pe.pointerId)) return
+        el.releasePointerCapture(pe.pointerId)
+        el.style.cursor = 'grab'
+        const finalT = parseTransform(el.getAttribute('transform') ?? '')
+        setImgTransforms(prev => ({ ...prev, [rawIdx]: finalT }))
+        setDraggingIdx(null)
+      })
+    })
   }
 
   useEffect(() => {
@@ -153,85 +211,79 @@ export default function FlyerEditorPage() {
         textEls.forEach((el, i) => { vals[i] = extractLines(el) })
         setTextValues(vals)
 
-        // Parse image transforms
-        const imgEls = doc.querySelectorAll('image')
         const transforms: Record<number, ImgTransform> = {}
-        imgEls.forEach((el, i) => {
+        doc.querySelectorAll('image').forEach((el, i) => {
           transforms[i] = parseTransform(el.getAttribute('transform') ?? '')
         })
         setImgTransforms(transforms)
-        setOriginalTransforms(transforms)
+        setOrigTransforms(transforms)
 
-        updatePreview(doc)
+        mountSvg(doc)
         setLoading(false)
       })
       .catch(e => { setLoadError((e as Error).message); setLoading(false) })
-    return () => { if (blobRef.current) URL.revokeObjectURL(blobRef.current) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function handleTextChange(idx: number, val: string) {
     setTextValues(prev => ({ ...prev, [idx]: val }))
     const doc = svgDocRef.current; if (!doc) return
-    const el = doc.querySelectorAll('text')[idx]
-    if (el) applyLines(el, val)
-    updatePreview(doc)
-  }
-
-  function applyImgTransform(imgIdx: number, t: ImgTransform) {
-    const doc = svgDocRef.current; if (!doc) return
-    const el = doc.querySelectorAll('image')[imgIdx]; if (!el) return
-    el.setAttribute('transform', buildTransform(t))
-    updatePreview(doc)
-  }
-
-  function handleTransformChange(imgIdx: number, patch: Partial<ImgTransform>) {
-    setImgTransforms(prev => {
-      const next = { ...prev[imgIdx], ...patch }
-      applyImgTransform(imgIdx, next)
-      return { ...prev, [imgIdx]: next }
-    })
+    // Patch both the source doc and the live preview element
+    const srcEl = doc.querySelectorAll('text')[idx]
+    if (srcEl) applyLines(srcEl, val)
+    const liveEl = liveSvgRef.current?.querySelectorAll('text')[idx]
+    if (liveEl) applyLines(liveEl, val)
   }
 
   function handleImageReplace(imgIdx: number, file: File) {
     const reader = new FileReader()
     reader.onload = e => {
       const dataUrl = e.target?.result as string
-      const doc = svgDocRef.current; if (!doc) return
-      const el = doc.querySelectorAll('image')[imgIdx]; if (!el) return
-      el.setAttributeNS('http://www.w3.org/1999/xlink', 'href', dataUrl)
-      el.setAttribute('href', dataUrl)
+      const XLINK = 'http://www.w3.org/1999/xlink'
+      // Patch source doc
+      const srcEl = svgDocRef.current?.querySelectorAll('image')[imgIdx]
+      if (srcEl) { srcEl.setAttributeNS(XLINK, 'href', dataUrl); srcEl.setAttribute('href', dataUrl) }
+      // Patch live preview
+      const liveEl = liveSvgRef.current?.querySelectorAll('image')[imgIdx]
+      if (liveEl) { liveEl.setAttributeNS(XLINK, 'href', dataUrl); liveEl.setAttribute('href', dataUrl) }
       setImgReplaced(prev => ({ ...prev, [imgIdx]: true }))
-      updatePreview(doc)
     }
     reader.readAsDataURL(file)
   }
 
-  // "Phủ toàn canvas" — scale image to cover the SVG canvas completely
-  function handleFillCanvas(imgIdx: number) {
-    const meta = IMAGE_META[imgIdx]; if (!meta) return
-    const sx = SVG_W / meta.w
-    const sy = SVG_H / meta.h
-    const t: ImgTransform = { tx: 0, ty: 0, sx, sy }
-    setImgTransforms(prev => ({ ...prev, [imgIdx]: t }))
-    applyImgTransform(imgIdx, t)
+  function patchTransform(imgIdx: number, t: ImgTransform) {
+    const str = buildTransform(t)
+    svgDocRef.current?.querySelectorAll('image')[imgIdx]?.setAttribute('transform', str)
+    liveSvgRef.current?.querySelectorAll('image')[imgIdx]?.setAttribute('transform', str)
   }
 
-  // "Phủ chiều rộng" — fit width
+  function handleTransformChange(imgIdx: number, patch: Partial<ImgTransform>) {
+    setImgTransforms(prev => {
+      const next = { ...prev[imgIdx], ...patch }
+      patchTransform(imgIdx, next)
+      return { ...prev, [imgIdx]: next }
+    })
+  }
+
   function handleFillWidth(imgIdx: number) {
-    const meta = IMAGE_META[imgIdx]; if (!meta) return
+    const meta = IMAGE_META.find(m => m.idx === imgIdx); if (!meta) return
     const s = SVG_W / meta.w
-    const cur = imgTransforms[imgIdx] ?? { tx: 0, ty: 0, sx: s, sy: s }
-    const t: ImgTransform = { ...cur, sx: s, sy: s }
+    const t: ImgTransform = { tx: 0, ty: imgTransforms[imgIdx]?.ty ?? 0, sx: s, sy: s }
     setImgTransforms(prev => ({ ...prev, [imgIdx]: t }))
-    applyImgTransform(imgIdx, t)
+    patchTransform(imgIdx, t)
   }
 
-  // Reset transform to original
+  function handleFillCanvas(imgIdx: number) {
+    const meta = IMAGE_META.find(m => m.idx === imgIdx); if (!meta) return
+    const t: ImgTransform = { tx: 0, ty: 0, sx: SVG_W / meta.w, sy: SVG_H / meta.h }
+    setImgTransforms(prev => ({ ...prev, [imgIdx]: t }))
+    patchTransform(imgIdx, t)
+  }
+
   function handleReset(imgIdx: number) {
-    const orig = originalTransforms[imgIdx]; if (!orig) return
+    const orig = origTransforms[imgIdx]; if (!orig) return
     setImgTransforms(prev => ({ ...prev, [imgIdx]: { ...orig } }))
-    applyImgTransform(imgIdx, orig)
+    patchTransform(imgIdx, orig)
   }
 
   function downloadSvg() {
@@ -246,8 +298,7 @@ export default function FlyerEditorPage() {
     const doc = svgDocRef.current; if (!doc) return
     setExporting(true); setDlOpen(false)
     try {
-      const str = getSvgString(doc)
-      const blob = new Blob([str], { type: 'image/svg+xml' })
+      const blob = new Blob([getSvgString(doc)], { type: 'image/svg+xml' })
       const url = URL.createObjectURL(blob)
       const img = new Image()
       img.width = Math.round(SVG_W); img.height = Math.round(SVG_H)
@@ -256,15 +307,13 @@ export default function FlyerEditorPage() {
       const canvas = document.createElement('canvas')
       canvas.width = Math.round(SVG_W); canvas.height = Math.round(SVG_H)
       const ctx = canvas.getContext('2d')!
-      if (format === 'jpg') { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height) }
+      if (format === 'jpg') { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height) }
       ctx.drawImage(img, 0, 0)
       const dataUrl = canvas.toDataURL(format === 'jpg' ? 'image/jpeg' : 'image/png', format === 'jpg' ? 0.92 : undefined)
       const a = document.createElement('a'); a.href = dataUrl; a.download = `tuyen-dung.${format}`; a.click()
     } catch { alert('Không thể xuất ảnh. Thử dùng SVG.') }
     setExporting(false)
   }
-
-  const t1 = imgTransforms[1]
 
   return (
     <div style={{ position: 'fixed', top: 0, left: '14rem', right: 0, bottom: 0, display: 'flex', flexDirection: 'column', background: '#f0f0f2', zIndex: 5 }}>
@@ -274,7 +323,9 @@ export default function FlyerEditorPage() {
           <Type size={18} className="text-violet-500" />
           <span className="font-semibold text-gray-800 text-sm">Flyer Editor</span>
           <span className="text-gray-300 text-xs">|</span>
-          <span className="text-gray-400 text-xs">Tờ rơi tuyển dụng VNCE</span>
+          <span className="text-gray-400 text-xs">
+            {draggingIdx !== null ? `Đang di chuyển ảnh ${draggingIdx}…` : 'Tờ rơi tuyển dụng VNCE'}
+          </span>
         </div>
         <div className="relative">
           <button onClick={() => setDlOpen(o => !o)} disabled={loading || !!loadError || exporting}
@@ -315,19 +366,14 @@ export default function FlyerEditorPage() {
 
       {!loading && !loadError && (
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-          {/* Preview */}
-          <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', padding: '32px' }}>
-            {previewSrc
-              // eslint-disable-next-line @next/next/no-img-element
-              ? <img src={previewSrc} alt="Xem trước tờ rơi"
-                  style={{ display: 'block', width: '100%', maxWidth: 820, height: 'auto', margin: '0 auto', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} />
-              : <div style={{ width: '100%', maxWidth: 820, margin: '0 auto', aspectRatio: `${SVG_W}/${SVG_H}`, borderRadius: 16, background: '#e5e7eb' }} />
-            }
-          </div>
+          {/* Preview — inline SVG mounted here */}
+          <div
+            ref={previewRef}
+            style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', padding: 32 }}
+          />
 
           {/* Editor panel */}
           <div className="w-80 shrink-0 bg-white border-l border-gray-200 flex flex-col overflow-hidden">
-            {/* Tabs */}
             <div className="flex border-b border-gray-200 shrink-0">
               {(['text', 'images'] as const).map(s => (
                 <button key={s} onClick={() => setActiveSection(s)}
@@ -339,7 +385,7 @@ export default function FlyerEditorPage() {
             </div>
 
             <div className="flex-1 overflow-y-auto">
-              {/* ── TEXT TAB ── */}
+              {/* TEXT TAB */}
               {activeSection === 'text' && (
                 <div className="p-4 space-y-5">
                   {TEXT_FIELDS.map(f => {
@@ -356,15 +402,20 @@ export default function FlyerEditorPage() {
                 </div>
               )}
 
-              {/* ── IMAGES TAB ── */}
+              {/* IMAGES TAB — only ảnh 2 and 3 */}
               {activeSection === 'images' && (
                 <div className="divide-y divide-gray-100">
-                  {IMAGE_META.map(({ idx, label, size }) => {
+                  <div className="px-4 py-2.5 bg-blue-50/60">
+                    <p className="text-[10px] text-blue-600 flex items-center gap-1">
+                      <Move size={10} />
+                      Kéo thả ảnh trực tiếp trên tờ rơi để di chuyển
+                    </p>
+                  </div>
+                  {IMAGE_META.map(({ idx, label, size, w, h }) => {
                     const tr = imgTransforms[idx]
                     const isOpen = expandedImg === idx
                     return (
-                      <div key={idx} className="bg-white">
-                        {/* Image header — click to expand */}
+                      <div key={idx}>
                         <button onClick={() => setExpandedImg(isOpen ? null : idx)}
                           className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors text-left">
                           <div>
@@ -400,27 +451,22 @@ export default function FlyerEditorPage() {
                               </button>
                             </div>
 
-                            {/* Transform sliders */}
                             {tr && (
                               <div className="space-y-3">
-                                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 flex items-center gap-1">
-                                  <Move size={9} />Vị trí
-                                </p>
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Vị trí tinh chỉnh</p>
                                 <SliderRow label="X (ngang)" value={tr.tx} min={-SVG_W} max={SVG_W} step={1}
                                   onChange={v => handleTransformChange(idx, { tx: v })} />
                                 <SliderRow label="Y (dọc)" value={tr.ty} min={-SVG_H} max={SVG_H} step={1}
                                   onChange={v => handleTransformChange(idx, { ty: v })} />
 
-                                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 flex items-center gap-1 pt-1">
-                                  <Maximize2 size={9} />Kéo giãn
-                                </p>
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 pt-1">Kéo giãn</p>
                                 <SliderRow label="Scale X" value={tr.sx} min={0.1} max={6} step={0.01}
                                   onChange={v => handleTransformChange(idx, { sx: v })} />
                                 <SliderRow label="Scale Y" value={tr.sy} min={0.1} max={6} step={0.01}
                                   onChange={v => handleTransformChange(idx, { sy: v })} />
                                 <button onClick={() => handleTransformChange(idx, { sy: tr.sx })}
                                   className="text-[10px] text-violet-600 hover:underline">
-                                  Đồng bộ Scale Y = Scale X
+                                  Đồng bộ Scale Y = Scale X (giữ tỷ lệ)
                                 </button>
                               </div>
                             )}
@@ -435,7 +481,7 @@ export default function FlyerEditorPage() {
 
             <div className="px-4 py-3 border-t border-gray-100 shrink-0">
               <p className="text-[10px] text-gray-400 leading-relaxed">
-                Chỉnh sửa xong nhấn <span className="font-semibold text-gray-500">Tải xuống</span> → SVG / PNG / JPG.
+                Chỉnh sửa xong → <span className="font-semibold text-gray-500">Tải xuống</span> SVG / PNG / JPG.
               </p>
             </div>
           </div>

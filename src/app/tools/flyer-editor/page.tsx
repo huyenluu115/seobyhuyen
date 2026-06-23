@@ -31,7 +31,6 @@ const IMAGE_LABELS = [
   { idx: 2, label: 'Ảnh thứ 3', size: '725 × 489' },
 ]
 
-// Extract full text from a <text> SVG element, grouped by y-value (each unique y = one line)
 function extractLines(textEl: Element): string {
   const tspans = Array.from(textEl.querySelectorAll('tspan'))
   const yMap = new Map<string, string>()
@@ -45,31 +44,20 @@ function extractLines(textEl: Element): string {
     .join('\n')
 }
 
-// Replace all tspans in a <text> element with simplified ones — one per original y-level
 function applyLines(textEl: Element, newText: string) {
   const tspans = Array.from(textEl.querySelectorAll('tspan'))
-
-  // Collect unique y-groups in order (preserving original y, class, x)
   const yGroups: Array<{ y: string; cls: string; x: string }> = []
   const seen = new Set<string>()
   tspans.forEach(ts => {
     const y = ts.getAttribute('y') ?? '0'
     if (!seen.has(y)) {
       seen.add(y)
-      yGroups.push({
-        y,
-        cls: ts.getAttribute('class') ?? '',
-        x: ts.getAttribute('x') ?? '0',
-      })
+      yGroups.push({ y, cls: ts.getAttribute('class') ?? '', x: ts.getAttribute('x') ?? '0' })
     }
   })
-
-  // Remove all existing tspans
   tspans.forEach(ts => ts.remove())
-
   const lines = newText.split('\n')
   const ns = 'http://www.w3.org/2000/svg'
-
   yGroups.forEach((g, i) => {
     const ts = textEl.ownerDocument!.createElementNS(ns, 'tspan')
     ts.setAttribute('x', g.x)
@@ -80,96 +68,97 @@ function applyLines(textEl: Element, newText: string) {
   })
 }
 
+const PREVIEW_W = 420
+const ASPECT = 2413.95 / 1596.17  // native viewBox ratio
+
 export default function FlyerEditorPage() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [textValues, setTextValues] = useState<Record<number, string>>({})
   const [imgReplaced, setImgReplaced] = useState<Record<number, boolean>>({})
   const [activeSection, setActiveSection] = useState<'text' | 'images'>('text')
-  const previewRef = useRef<HTMLDivElement>(null)
-  const previewWidthRef = useRef(400)
+  const [previewSrc, setPreviewSrc] = useState<string>('')
+  const svgDocRef = useRef<Document | null>(null)
+  const blobUrlRef = useRef<string>('')
 
-  function getSvg(): SVGSVGElement | null {
-    return (previewRef.current?.querySelector('svg') as SVGSVGElement) ?? null
+  function makePreviewSrc(doc: Document): string {
+    const svgEl = doc.documentElement
+    svgEl.setAttribute('width', String(PREVIEW_W))
+    svgEl.setAttribute('height', String(Math.round(PREVIEW_W * ASPECT)))
+    const str = new XMLSerializer().serializeToString(doc)
+    const blob = new Blob([str], { type: 'image/svg+xml' })
+    const url = URL.createObjectURL(blob)
+    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current)
+    blobUrlRef.current = url
+    return url
   }
 
   useEffect(() => {
     fetch(FLYER_PATH)
-      .then(r => {
-        if (!r.ok) throw new Error('Không tải được file SVG')
-        return r.text()
-      })
+      .then(r => { if (!r.ok) throw new Error('Không tải được file SVG'); return r.text() })
       .then(text => {
         const parser = new DOMParser()
         const doc = parser.parseFromString(text, 'image/svg+xml')
         if (doc.querySelector('parsererror')) throw new Error('SVG không hợp lệ')
+        svgDocRef.current = doc
 
-        // Extract initial text values
         const textEls = doc.querySelectorAll('text')
         const vals: Record<number, string> = {}
         textEls.forEach((el, i) => { vals[i] = extractLines(el) })
         setTextValues(vals)
 
-        // Set display width and inject into preview div
-        const svgEl = doc.documentElement as unknown as SVGSVGElement
-        svgEl.setAttribute('width', String(previewWidthRef.current))
-        svgEl.removeAttribute('height')
-
-        if (previewRef.current) {
-          previewRef.current.innerHTML = new XMLSerializer().serializeToString(svgEl)
-        }
-
+        setPreviewSrc(makePreviewSrc(doc))
         setLoading(false)
       })
-      .catch(e => {
-        setLoadError((e as Error).message)
-        setLoading(false)
-      })
+      .catch(e => { setLoadError((e as Error).message); setLoading(false) })
+    return () => { if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function handleTextChange(idx: number, val: string) {
     setTextValues(prev => ({ ...prev, [idx]: val }))
-    const svg = getSvg()
-    if (!svg) return
-    const el = svg.querySelectorAll('text')[idx]
+    const doc = svgDocRef.current
+    if (!doc) return
+    const el = doc.querySelectorAll('text')[idx]
     if (el) applyLines(el, val)
+    setPreviewSrc(makePreviewSrc(doc))
   }
 
   function handleImageReplace(imgIdx: number, file: File) {
     const reader = new FileReader()
     reader.onload = e => {
       const dataUrl = e.target?.result as string
-      const svg = getSvg()
-      if (!svg) return
-      const el = svg.querySelectorAll('image')[imgIdx]
+      const doc = svgDocRef.current
+      if (!doc) return
+      const el = doc.querySelectorAll('image')[imgIdx]
       if (!el) return
       el.setAttributeNS('http://www.w3.org/1999/xlink', 'href', dataUrl)
       el.setAttribute('href', dataUrl)
       setImgReplaced(prev => ({ ...prev, [imgIdx]: true }))
+      setPreviewSrc(makePreviewSrc(doc))
     }
     reader.readAsDataURL(file)
   }
 
   function handleDownload() {
-    const svg = getSvg()
-    if (!svg) return
-    // Remove display width override so the SVG exports at native resolution
-    const savedW = svg.getAttribute('width')
-    svg.removeAttribute('width')
-    const svgStr = new XMLSerializer().serializeToString(svg)
-    if (savedW) svg.setAttribute('width', savedW)
-
-    const blob = new Blob([svgStr], { type: 'image/svg+xml' })
+    const doc = svgDocRef.current
+    if (!doc) return
+    const svgEl = doc.documentElement
+    svgEl.removeAttribute('width')
+    svgEl.removeAttribute('height')
+    const str = new XMLSerializer().serializeToString(doc)
+    // restore preview size
+    svgEl.setAttribute('width', String(PREVIEW_W))
+    svgEl.setAttribute('height', String(Math.round(PREVIEW_W * ASPECT)))
+    const blob = new Blob([str], { type: 'image/svg+xml' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url
-    a.download = 'tuyen-dung-edited.svg'
-    a.click()
+    a.href = url; a.download = 'tuyen-dung-edited.svg'; a.click()
     URL.revokeObjectURL(url)
   }
 
   return (
-    <div className="flex flex-col" style={{ height: 'calc(100vh)', background: '#f0f0f2' }}>
+    <div className="flex flex-col" style={{ height: '100vh', background: '#f0f0f2' }}>
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-3 bg-white border-b border-gray-200 shrink-0">
         <div className="flex items-center gap-2">
@@ -178,17 +167,12 @@ export default function FlyerEditorPage() {
           <span className="text-gray-300 text-xs">|</span>
           <span className="text-gray-400 text-xs">Tờ rơi tuyển dụng VNCE</span>
         </div>
-        <Button
-          onClick={handleDownload}
-          disabled={loading || !!loadError}
-          size="sm"
-          className="gap-1.5 bg-violet-600 hover:bg-violet-700 h-8 text-xs"
-        >
+        <Button onClick={handleDownload} disabled={loading || !!loadError} size="sm"
+          className="gap-1.5 bg-violet-600 hover:bg-violet-700 h-8 text-xs">
           <Download size={12} />Tải SVG
         </Button>
       </div>
 
-      {/* Loading state */}
       {loading && (
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center space-y-3">
@@ -198,62 +182,49 @@ export default function FlyerEditorPage() {
         </div>
       )}
 
-      {/* Error state */}
       {loadError && (
         <div className="flex-1 flex items-center justify-center">
-          <div className="text-center space-y-2">
-            <p className="text-red-500 text-sm font-medium">{loadError}</p>
-            <p className="text-gray-400 text-xs">Đảm bảo file SVG đã được đặt trong public/templates/</p>
-          </div>
+          <p className="text-red-500 text-sm">{loadError}</p>
         </div>
       )}
 
-      {/* Main editor */}
       {!loading && !loadError && (
         <div className="flex flex-1 overflow-hidden">
-          {/* SVG Preview */}
+          {/* Preview */}
           <div className="flex-1 overflow-auto p-6 flex items-start justify-center">
-            <div
-              ref={previewRef}
-              className="bg-white rounded-xl shadow-2xl overflow-hidden shrink-0"
-              style={{ maxWidth: '100%' }}
-            />
+            {previewSrc ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={previewSrc}
+                alt="Xem trước tờ rơi"
+                width={PREVIEW_W}
+                height={Math.round(PREVIEW_W * ASPECT)}
+                className="rounded-xl shadow-2xl shrink-0"
+                style={{ display: 'block' }}
+              />
+            ) : (
+              <div className="w-[420px] rounded-xl bg-gray-200 animate-pulse" style={{ height: Math.round(PREVIEW_W * ASPECT) }} />
+            )}
           </div>
 
           {/* Editor panel */}
           <div className="w-72 shrink-0 bg-white border-l border-gray-200 flex flex-col overflow-hidden">
-            {/* Section tabs */}
             <div className="flex border-b border-gray-200 shrink-0">
-              <button
-                onClick={() => setActiveSection('text')}
-                className={cn(
-                  'flex-1 py-2.5 text-xs font-medium transition-colors',
-                  activeSection === 'text'
-                    ? 'text-violet-600 border-b-2 border-violet-500 bg-violet-50/40'
-                    : 'text-gray-500 hover:text-gray-700'
-                )}
-              >
+              <button onClick={() => setActiveSection('text')}
+                className={cn('flex-1 py-2.5 text-xs font-medium transition-colors',
+                  activeSection === 'text' ? 'text-violet-600 border-b-2 border-violet-500 bg-violet-50/40' : 'text-gray-500 hover:text-gray-700')}>
                 Văn bản ({TEXT_FIELDS.length})
               </button>
-              <button
-                onClick={() => setActiveSection('images')}
-                className={cn(
-                  'flex-1 py-2.5 text-xs font-medium transition-colors',
-                  activeSection === 'images'
-                    ? 'text-violet-600 border-b-2 border-violet-500 bg-violet-50/40'
-                    : 'text-gray-500 hover:text-gray-700'
-                )}
-              >
+              <button onClick={() => setActiveSection('images')}
+                className={cn('flex-1 py-2.5 text-xs font-medium transition-colors',
+                  activeSection === 'images' ? 'text-violet-600 border-b-2 border-violet-500 bg-violet-50/40' : 'text-gray-500 hover:text-gray-700')}>
                 Hình ảnh ({IMAGE_LABELS.length})
               </button>
             </div>
 
-            {/* Panel content */}
             <div className="flex-1 overflow-y-auto p-4 space-y-5">
-              {/* ── Text tab ── */}
               {activeSection === 'text' && TEXT_FIELDS.map(f => {
                 const val = textValues[f.idx] ?? ''
-                const rows = Math.max(1, Math.min(5, val.split('\n').length + 1))
                 return (
                   <div key={f.idx}>
                     <label className="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">
@@ -261,43 +232,31 @@ export default function FlyerEditorPage() {
                     </label>
                     <textarea
                       value={val}
-                      rows={rows}
+                      rows={Math.max(1, Math.min(5, val.split('\n').length + 1))}
                       onChange={e => handleTextChange(f.idx, e.target.value)}
                       className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-2 outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-300 resize-none leading-relaxed"
-                      placeholder="Nhập nội dung..."
                     />
                   </div>
                 )
               })}
 
-              {/* ── Images tab ── */}
               {activeSection === 'images' && IMAGE_LABELS.map(({ idx, label, size }) => (
                 <div key={idx} className="p-3 rounded-xl border border-gray-100 bg-gray-50 space-y-2">
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">{label}</p>
                     <p className="text-[10px] text-gray-300 mt-0.5">{size} px</p>
                   </div>
-                  {imgReplaced[idx] && (
-                    <p className="text-[10px] text-green-600 font-medium">✓ Đã thay ảnh mới</p>
-                  )}
+                  {imgReplaced[idx] && <p className="text-[10px] text-green-600 font-medium">✓ Đã thay ảnh mới</p>}
                   <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-gray-300 hover:border-violet-400 hover:bg-violet-50 cursor-pointer text-xs text-gray-500 transition-colors w-full">
                     <Upload size={12} className="shrink-0" />
-                    <span>{imgReplaced[idx] ? 'Thay ảnh khác' : 'Chọn ảnh thay thế (JPG/PNG)'}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={e => {
-                        const f = e.target.files?.[0]
-                        if (f) handleImageReplace(idx, f)
-                      }}
-                    />
+                    <span>{imgReplaced[idx] ? 'Thay ảnh khác' : 'Chọn ảnh thay thế'}</span>
+                    <input type="file" accept="image/*" className="hidden"
+                      onChange={e => { const f = e.target.files?.[0]; if (f) handleImageReplace(idx, f) }} />
                   </label>
                 </div>
               ))}
             </div>
 
-            {/* Footer hint */}
             <div className="px-4 py-3 border-t border-gray-100 shrink-0">
               <p className="text-[10px] text-gray-400 leading-relaxed">
                 Chỉnh sửa văn bản hoặc thay ảnh, sau đó nhấn <span className="font-semibold">Tải SVG</span> để xuất file.

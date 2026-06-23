@@ -218,12 +218,18 @@ export default function FlyerEditorPage() {
         setImgTransforms(transforms)
         setOrigTransforms(transforms)
 
-        mountSvg(doc)
         setLoading(false)
       })
       .catch(e => { setLoadError((e as Error).message); setLoading(false) })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Mount inline SVG only AFTER loading=false so previewRef.current is in the DOM
+  useEffect(() => {
+    if (loading || loadError || !svgDocRef.current) return
+    mountSvg(svgDocRef.current)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading])
 
   function handleTextChange(idx: number, val: string) {
     setTextValues(prev => ({ ...prev, [idx]: val }))

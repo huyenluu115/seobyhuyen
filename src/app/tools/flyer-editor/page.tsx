@@ -153,11 +153,18 @@ let svgFontCSS: string | null = null
 async function buildSvgFontCSS(): Promise<string> {
   if (svgFontCSS) return svgFontCSS
 
-  // Fetch font files and convert to data URIs
+  // Fetch font files and convert to data URIs.
+  // Must chunk the binary conversion — spread of 37 000+ args hits browser limits
+  // and silently produces a corrupt/empty string.
   async function toDataUri(path: string): Promise<string> {
     const buf = await fetch(path).then(r => r.arrayBuffer())
-    const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
-    return `data:font/woff2;base64,${b64}`
+    const bytes = new Uint8Array(buf)
+    let binary = ''
+    const CHUNK = 8192
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+    }
+    return `data:font/woff2;base64,${btoa(binary)}`
   }
   const [mnLa, mnVi, miLa, miVi, rLa, rVi] = await Promise.all([
     toDataUri('/fonts/montserrat-normal-la.woff2'),
@@ -443,19 +450,28 @@ export default function FlyerEditorPage() {
     const blob = new Blob([svgStr], { type: 'image/svg+xml' })
     const url = URL.createObjectURL(blob)
     const img = new Image()
+
+    // IMPORTANT: add img to the DOM before setting src.
+    // Canvas uses document fonts when drawing an <img> that is in the DOM;
+    // an off-DOM image renders in isolation and misses document.fonts.
+    img.style.cssText = 'position:fixed;opacity:0;pointer-events:none;width:1px;height:1px'
+    document.body.appendChild(img)
+
     await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = rej; img.src = url })
     URL.revokeObjectURL(url)
 
-    // Critical: wait for SVG's embedded woff2 fonts to fully decode + render.
-    // img.onload fires when the SVG resource loads, NOT when its @font-face fonts
-    // finish decoding. 400ms covers even slow font decode on first export.
-    await new Promise(res => setTimeout(res, 400))
+    // After onload, wait for all document fonts to finish loading (covers the
+    // embedded woff2 fonts that the SVG just triggered) and one paint cycle.
+    await document.fonts.ready
+    await new Promise(res => requestAnimationFrame(res))
 
     const W = Math.round(SVG_W), H = Math.round(EXPORT_H)
     const canvas = document.createElement('canvas')
     canvas.width = W; canvas.height = H
     const ctx = canvas.getContext('2d')!
     ctx.drawImage(img, 0, 0, W, H)
+
+    img.remove() // clean up
     return canvas
   }
 

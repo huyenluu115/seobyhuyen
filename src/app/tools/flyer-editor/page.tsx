@@ -404,28 +404,67 @@ export default function FlyerEditorPage() {
 
   async function svgToCanvas(): Promise<HTMLCanvasElement> {
     const doc = svgDocRef.current!
-    // Embed fonts so canvas renders text correctly (not Times New Roman fallback)
     const svgWithFonts = await injectFonts(getSvgString(doc))
     const blob = new Blob([svgWithFonts], { type: 'image/svg+xml' })
     const url = URL.createObjectURL(blob)
     const img = new Image()
     img.width = Math.round(SVG_W); img.height = Math.round(SVG_H)
+    // Draw on transparent canvas so empty rows have alpha=0 (detectable)
     await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = rej; img.src = url })
     URL.revokeObjectURL(url)
     const canvas = document.createElement('canvas')
     canvas.width = Math.round(SVG_W); canvas.height = Math.round(SVG_H)
     const ctx = canvas.getContext('2d')!
-    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height)
+    // Do NOT pre-fill white — keep transparent so we can detect true bottom
     ctx.drawImage(img, 0, 0)
-    return canvas
+    return trimCanvasBottom(canvas)
+  }
+
+  function trimCanvasBottom(canvas: HTMLCanvasElement): HTMLCanvasElement {
+    const ctx = canvas.getContext('2d')!
+    const { width, height } = canvas
+    const imageData = ctx.getImageData(0, 0, width, height)
+    const data = imageData.data
+
+    // Scan rows from bottom; stop at first row that has any visible pixel
+    let lastRow = height - 1
+    outer: for (let y = height - 1; y >= 0; y--) {
+      const base = y * width * 4
+      // Sample every 6 pixels across the row for speed
+      for (let x = 0; x < width; x += 6) {
+        if (data[base + x * 4 + 3] > 8) { // alpha > 8 = has content
+          lastRow = y
+          break outer
+        }
+      }
+    }
+
+    const newH = Math.min(lastRow + 2, height) // +2px safety margin
+    if (newH >= height) return canvas // nothing to trim
+
+    const out = document.createElement('canvas')
+    out.width = width; out.height = newH
+    out.getContext('2d')!.drawImage(canvas, 0, 0)
+    return out
   }
 
   async function downloadRaster(format: 'png' | 'jpg') {
     if (!svgDocRef.current) return
     setExporting(true); setDlOpen(false)
     try {
-      const canvas = await svgToCanvas()
-      const dataUrl = canvas.toDataURL(format === 'jpg' ? 'image/jpeg' : 'image/png', 0.92)
+      const trimmed = await svgToCanvas()
+      let dataUrl: string
+      if (format === 'jpg') {
+        // JPG needs white background — composite onto white canvas
+        const out = document.createElement('canvas')
+        out.width = trimmed.width; out.height = trimmed.height
+        const c = out.getContext('2d')!
+        c.fillStyle = '#fff'; c.fillRect(0, 0, out.width, out.height)
+        c.drawImage(trimmed, 0, 0)
+        dataUrl = out.toDataURL('image/jpeg', 0.92)
+      } else {
+        dataUrl = trimmed.toDataURL('image/png')
+      }
       const a = document.createElement('a'); a.href = dataUrl; a.download = `tuyen-dung.${format}`; a.click()
     } catch { alert('Không thể xuất ảnh. Thử dùng SVG.') }
     setExporting(false)
@@ -435,8 +474,14 @@ export default function FlyerEditorPage() {
     if (!svgDocRef.current) return
     setExporting(true); setDlOpen(false)
     try {
-      const canvas = await svgToCanvas()
-      const dataUrl = canvas.toDataURL('image/png')
+      const trimmed = await svgToCanvas()
+      // Composite on white for PDF print
+      const out = document.createElement('canvas')
+      out.width = trimmed.width; out.height = trimmed.height
+      const c = out.getContext('2d')!
+      c.fillStyle = '#fff'; c.fillRect(0, 0, out.width, out.height)
+      c.drawImage(trimmed, 0, 0)
+      const dataUrl = out.toDataURL('image/png')
       const win = window.open('', '_blank')
       if (!win) { alert('Trình duyệt chặn popup. Vui lòng cho phép popup.'); setExporting(false); return }
       win.document.write(`<!DOCTYPE html><html><head><style>

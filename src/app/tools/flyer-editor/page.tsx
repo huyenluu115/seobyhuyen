@@ -110,6 +110,67 @@ function getSvgString(doc: Document): string {
   return new XMLSerializer().serializeToString(doc)
 }
 
+// Fetch a font file and return as base64 data URI
+async function fontToDataUri(path: string): Promise<string> {
+  const res = await fetch(path)
+  const buf = await res.arrayBuffer()
+  const bytes = new Uint8Array(buf)
+  let bin = ''
+  for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i])
+  return `data:font/woff2;base64,${btoa(bin)}`
+}
+
+// Build @font-face CSS mapping PostScript names → local font files
+// Called once; result is cached for subsequent exports
+let fontFaceCache: string | null = null
+async function buildFontFaceCSS(): Promise<string> {
+  if (fontFaceCache) return fontFaceCache
+
+  const [mnVi, mnLa, miVi, miLa, rVi, rLa] = await Promise.all([
+    fontToDataUri('/fonts/montserrat-normal-vi.woff2'),
+    fontToDataUri('/fonts/montserrat-normal-la.woff2'),
+    fontToDataUri('/fonts/montserrat-italic-vi.woff2'),
+    fontToDataUri('/fonts/montserrat-italic-la.woff2'),
+    fontToDataUri('/fonts/roboto-vi.woff2'),
+    fontToDataUri('/fonts/roboto-la.woff2'),
+  ])
+
+  // Vietnamese unicode range (covers Vietnamese characters)
+  const viRange = 'U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB'
+
+  // For each PostScript name used in the SVG, create @font-face
+  // that maps that exact name to the right woff2 font
+  const makeFace = (psName: string, viSrc: string, laSrc: string, extra = '') =>
+    `@font-face{font-family:'${psName}';src:url(${viSrc}) format('woff2');unicode-range:${viRange};${extra}}` +
+    `@font-face{font-family:'${psName}';src:url(${laSrc}) format('woff2');${extra}}`
+
+  const css = [
+    makeFace('Montserrat-SemiBold',        mnVi, mnLa, 'font-weight:600;'),
+    makeFace('Montserrat-Bold',            mnVi, mnLa, 'font-weight:700;'),
+    makeFace('Montserrat-BoldItalic',      miVi, miLa, 'font-weight:700;font-style:italic;'),
+    makeFace('Montserrat-ExtraBoldItalic', miVi, miLa, 'font-weight:800;font-style:italic;'),
+    makeFace('Montserrat-BlackItalic',     miVi, miLa, 'font-weight:900;font-style:italic;'),
+    makeFace('Roboto-Regular',             rVi,  rLa,  'font-weight:400;'),
+    makeFace('Roboto-Bold',                rVi,  rLa,  'font-weight:700;'),
+    // Also map generic names so fallbacks work
+    makeFace('Montserrat',                 mnVi, mnLa),
+    makeFace('Roboto',                     rVi,  rLa),
+  ].join('')
+
+  fontFaceCache = css
+  return css
+}
+
+// Inject font @font-face into SVG string before canvas rendering
+async function injectFonts(svgStr: string): Promise<string> {
+  const fontCSS = await buildFontFaceCSS()
+  // Inject into existing <style> block, or add one after <svg ...>
+  if (svgStr.includes('<style>')) {
+    return svgStr.replace('<style>', `<style>${fontCSS}`)
+  }
+  return svgStr.replace(/(<svg[^>]*>)/, `$1<style>${fontCSS}</style>`)
+}
+
 function SliderRow({ label, value, min, max, step, onChange }: {
   label: string; value: number; min: number; max: number; step: number
   onChange: (v: number) => void
@@ -343,7 +404,9 @@ export default function FlyerEditorPage() {
 
   async function svgToCanvas(): Promise<HTMLCanvasElement> {
     const doc = svgDocRef.current!
-    const blob = new Blob([getSvgString(doc)], { type: 'image/svg+xml' })
+    // Embed fonts so canvas renders text correctly (not Times New Roman fallback)
+    const svgWithFonts = await injectFonts(getSvgString(doc))
+    const blob = new Blob([svgWithFonts], { type: 'image/svg+xml' })
     const url = URL.createObjectURL(blob)
     const img = new Image()
     img.width = Math.round(SVG_W); img.height = Math.round(SVG_H)

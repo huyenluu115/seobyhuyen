@@ -34,6 +34,26 @@ const SVG_W = 1596.17
 const SVG_H = 2413.95
 
 interface ImgTransform { tx: number; ty: number; sx: number; sy: number }
+interface TextStyle { fontSize: number; fontWeight: 'normal' | 'bold' }
+
+function readTextStyle(textEl: Element): TextStyle {
+  // font-size may be on <text> or the first <tspan>
+  const fsRaw = textEl.getAttribute('font-size')
+    ?? textEl.querySelector('tspan')?.getAttribute('font-size')
+    ?? ''
+  const fontSize = parseFloat(fsRaw)
+  const fwRaw = textEl.getAttribute('font-weight')
+    ?? textEl.querySelector('tspan')?.getAttribute('font-weight')
+    ?? 'normal'
+  const fontWeight: 'normal' | 'bold' =
+    (fwRaw === 'bold' || Number(fwRaw) >= 700) ? 'bold' : 'normal'
+  return { fontSize: isNaN(fontSize) ? 24 : fontSize, fontWeight }
+}
+
+function applyTextStyle(textEl: Element, style: TextStyle) {
+  textEl.setAttribute('font-size', String(style.fontSize))
+  textEl.setAttribute('font-weight', style.fontWeight)
+}
 
 function parseTransform(str: string): ImgTransform {
   const t = str.match(/translate\(\s*([-\d.]+)[,\s]+([-\d.]+)\s*\)/)
@@ -116,6 +136,8 @@ export default function FlyerEditorPage() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [textValues, setTextValues] = useState<Record<number, string>>({})
+  const [textStyles, setTextStyles] = useState<Record<number, TextStyle>>({})
+  const [origTextStyles, setOrigTextStyles] = useState<Record<number, TextStyle>>({})
   const [imgReplaced, setImgReplaced] = useState<Record<number, boolean>>({})
   const [imgTransforms, setImgTransforms] = useState<Record<number, ImgTransform>>({})
   const [origTransforms, setOrigTransforms] = useState<Record<number, ImgTransform>>({})
@@ -208,8 +230,14 @@ export default function FlyerEditorPage() {
 
         const textEls = doc.querySelectorAll('text')
         const vals: Record<number, string> = {}
-        textEls.forEach((el, i) => { vals[i] = extractLines(el) })
+        const styles: Record<number, TextStyle> = {}
+        textEls.forEach((el, i) => {
+          vals[i] = extractLines(el)
+          styles[i] = readTextStyle(el)
+        })
         setTextValues(vals)
+        setTextStyles(styles)
+        setOrigTextStyles(styles)
 
         const transforms: Record<number, ImgTransform> = {}
         doc.querySelectorAll('image').forEach((el, i) => {
@@ -239,6 +267,19 @@ export default function FlyerEditorPage() {
     if (srcEl) applyLines(srcEl, val)
     const liveEl = liveSvgRef.current?.querySelectorAll('text')[idx]
     if (liveEl) applyLines(liveEl, val)
+  }
+
+  function handleStyleChange(idx: number, patch: Partial<TextStyle>) {
+    setTextStyles(prev => {
+      const next = { ...prev[idx], ...patch } as TextStyle
+      // Patch svgDocRef
+      const srcEl = svgDocRef.current?.querySelectorAll('text')[idx]
+      if (srcEl) applyTextStyle(srcEl, next)
+      // Patch live preview
+      const liveEl = liveSvgRef.current?.querySelectorAll('text')[idx]
+      if (liveEl) applyTextStyle(liveEl, next)
+      return { ...prev, [idx]: next }
+    })
   }
 
   function handleImageReplace(imgIdx: number, file: File) {
@@ -425,12 +466,48 @@ export default function FlyerEditorPage() {
                 <div className="p-4 space-y-5">
                   {TEXT_FIELDS.map(f => {
                     const val = textValues[f.idx] ?? ''
+                    const st = textStyles[f.idx] ?? { fontSize: 24, fontWeight: 'normal' as const }
+                    const isBold = st.fontWeight === 'bold'
                     return (
                       <div key={f.idx}>
                         <label className="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">{f.label}</label>
                         <textarea value={val} rows={Math.max(1, Math.min(5, val.split('\n').length + 1))}
                           onChange={e => handleTextChange(f.idx, e.target.value)}
                           className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-2 outline-none focus:ring-2 focus:ring-violet-200 resize-none leading-relaxed" />
+                        {/* Style controls */}
+                        <div className="flex items-center gap-2 mt-1.5">
+                          {/* Bold toggle */}
+                          <button
+                            onClick={() => handleStyleChange(f.idx, { fontWeight: isBold ? 'normal' : 'bold' })}
+                            title={isBold ? 'Đang đậm — nhấn để bỏ' : 'Nhấn để in đậm'}
+                            className={cn(
+                              'shrink-0 w-6 h-6 rounded text-xs font-black border transition-colors',
+                              isBold
+                                ? 'bg-gray-800 text-white border-gray-800'
+                                : 'bg-white text-gray-500 border-gray-300 hover:border-gray-600 hover:text-gray-700'
+                            )}>B</button>
+                          {/* Font size number */}
+                          <input
+                            type="number" value={st.fontSize} min={4} max={300} step={1}
+                            onChange={e => {
+                              const v = parseFloat(e.target.value)
+                              if (!isNaN(v) && v > 0) handleStyleChange(f.idx, { fontSize: v })
+                            }}
+                            className="w-14 shrink-0 text-[11px] border border-gray-200 rounded px-1.5 py-0.5 text-center outline-none focus:ring-1 focus:ring-violet-300" />
+                          {/* Font size slider */}
+                          <input
+                            type="range" value={st.fontSize} min={4} max={200} step={1}
+                            onChange={e => handleStyleChange(f.idx, { fontSize: parseFloat(e.target.value) })}
+                            className="flex-1 h-1 accent-violet-500" />
+                          {/* Reset style */}
+                          {(origTextStyles[f.idx] &&
+                            (origTextStyles[f.idx].fontSize !== st.fontSize || origTextStyles[f.idx].fontWeight !== st.fontWeight)) && (
+                            <button
+                              onClick={() => handleStyleChange(f.idx, origTextStyles[f.idx])}
+                              title="Khôi phục style gốc"
+                              className="shrink-0 text-[10px] text-violet-500 hover:text-violet-700">↺</button>
+                          )}
+                        </div>
                       </div>
                     )
                   })}

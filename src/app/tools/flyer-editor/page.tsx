@@ -437,12 +437,14 @@ export default function FlyerEditorPage() {
     // Strategy A: load fonts into document so canvas can use them
     await loadDocumentFonts()
 
-    // Get SVG string and hard-crop the viewBox to actual design height
-    // (viewBox is 2413.95 but content ends at 2195.16 — ~219px empty below)
-    let svgStr = getSvgString(doc).replace(
-      /viewBox="[^"]+"/,
-      `viewBox="0 0 ${SVG_W} ${EXPORT_H}"`
-    )
+    const W = Math.round(SVG_W), H = Math.round(EXPORT_H)
+
+    // Crop viewBox to actual content height and set explicit pixel dimensions.
+    // SVG without explicit width/height gets default CSS intrinsic size (300×150)
+    // which causes browsers to render into a tiny buffer then stretch — wrong size.
+    let svgStr = getSvgString(doc)
+      .replace(/viewBox="[^"]+"/, `viewBox="0 0 ${SVG_W} ${EXPORT_H}"`)
+      .replace(/<svg /, `<svg width="${W}" height="${H}" `)
 
     // Strategy B: embed fonts as data-URIs inside the SVG blob
     svgStr = await injectFonts(svgStr)
@@ -451,27 +453,22 @@ export default function FlyerEditorPage() {
     const url = URL.createObjectURL(blob)
     const img = new Image()
 
-    // IMPORTANT: add img to the DOM before setting src.
-    // Canvas uses document fonts when drawing an <img> that is in the DOM;
-    // an off-DOM image renders in isolation and misses document.fonts.
-    img.style.cssText = 'position:fixed;opacity:0;pointer-events:none;width:1px;height:1px'
+    // Add img to DOM (offscreen, natural size) so canvas can access document.fonts
+    img.style.cssText = 'position:fixed;top:-99999px;left:-99999px;opacity:0;pointer-events:none'
     document.body.appendChild(img)
 
     await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = rej; img.src = url })
     URL.revokeObjectURL(url)
 
-    // After onload, wait for all document fonts to finish loading (covers the
-    // embedded woff2 fonts that the SVG just triggered) and one paint cycle.
     await document.fonts.ready
     await new Promise(res => requestAnimationFrame(res))
 
-    const W = Math.round(SVG_W), H = Math.round(EXPORT_H)
     const canvas = document.createElement('canvas')
     canvas.width = W; canvas.height = H
     const ctx = canvas.getContext('2d')!
     ctx.drawImage(img, 0, 0, W, H)
 
-    img.remove() // clean up
+    img.remove()
     return canvas
   }
 

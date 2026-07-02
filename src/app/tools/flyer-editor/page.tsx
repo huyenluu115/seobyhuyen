@@ -110,65 +110,87 @@ function getSvgString(doc: Document): string {
   return new XMLSerializer().serializeToString(doc)
 }
 
-// Fetch a font file and return as base64 data URI
-async function fontToDataUri(path: string): Promise<string> {
-  const res = await fetch(path)
-  const buf = await res.arrayBuffer()
-  const bytes = new Uint8Array(buf)
-  let bin = ''
-  for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i])
-  return `data:font/woff2;base64,${btoa(bin)}`
+// Actual design content height — the background rect ends at 65.26+2129.9=2195.16.
+// The viewBox is 2413.95, leaving ~219 empty units below. We crop to this.
+const EXPORT_H = 2195.16
+
+// Vietnamese unicode range
+const VI_RANGE = 'U+0102-0103,U+0110-0111,U+0128-0129,U+0168-0169,U+01A0-01A1,U+01AF-01B0,U+0300-0301,U+0303-0304,U+0308-0309,U+0323,U+0329,U+1EA0-1EF9,U+20AB'
+
+// Map of PostScript font name → file paths + descriptor
+const FONT_DEFS = [
+  { name: 'Montserrat-SemiBold',        la: '/fonts/montserrat-normal-la.woff2', vi: '/fonts/montserrat-normal-vi.woff2', style: 'normal',  weight: '600' },
+  { name: 'Montserrat-Bold',            la: '/fonts/montserrat-normal-la.woff2', vi: '/fonts/montserrat-normal-vi.woff2', style: 'normal',  weight: '700' },
+  { name: 'Montserrat-BoldItalic',      la: '/fonts/montserrat-italic-la.woff2', vi: '/fonts/montserrat-italic-vi.woff2', style: 'italic', weight: '700' },
+  { name: 'Montserrat-ExtraBoldItalic', la: '/fonts/montserrat-italic-la.woff2', vi: '/fonts/montserrat-italic-vi.woff2', style: 'italic', weight: '800' },
+  { name: 'Montserrat-BlackItalic',     la: '/fonts/montserrat-italic-la.woff2', vi: '/fonts/montserrat-italic-vi.woff2', style: 'italic', weight: '900' },
+  { name: 'Roboto-Regular',             la: '/fonts/roboto-la.woff2',            vi: '/fonts/roboto-vi.woff2',            style: 'normal',  weight: '400' },
+  { name: 'Roboto-Bold',                la: '/fonts/roboto-la.woff2',            vi: '/fonts/roboto-vi.woff2',            style: 'normal',  weight: '700' },
+  { name: 'Montserrat',                 la: '/fonts/montserrat-normal-la.woff2', vi: '/fonts/montserrat-normal-vi.woff2', style: 'normal',  weight: '400 900' },
+  { name: 'Roboto',                     la: '/fonts/roboto-la.woff2',            vi: '/fonts/roboto-vi.woff2',            style: 'normal',  weight: '400 700' },
+] as const
+
+// ── Font loading: two strategies run in parallel ────────────────────────────
+// Strategy A: inject @font-face into the HTML document so canvas can see them
+// Strategy B: embed as data:URI in the SVG blob (belt + suspenders)
+
+let docFontsLoaded = false
+async function loadDocumentFonts(): Promise<void> {
+  if (docFontsLoaded) return
+  const loads = FONT_DEFS.flatMap(({ name, la, vi, style, weight }) => {
+    const desc: FontFaceDescriptors = { style, weight }
+    return [
+      new FontFace(name, `url(${la})`          , desc),
+      new FontFace(name, `url(${vi})`, { ...desc, unicodeRange: VI_RANGE }),
+    ]
+  })
+  await Promise.all(loads.map(f => f.load().then(f => document.fonts.add(f))))
+  await document.fonts.ready
+  docFontsLoaded = true
 }
 
-// Build @font-face CSS mapping PostScript names → local font files
-// Called once; result is cached for subsequent exports
-let fontFaceCache: string | null = null
-async function buildFontFaceCSS(): Promise<string> {
-  if (fontFaceCache) return fontFaceCache
+let svgFontCSS: string | null = null
+async function buildSvgFontCSS(): Promise<string> {
+  if (svgFontCSS) return svgFontCSS
 
-  const [mnVi, mnLa, miVi, miLa, rVi, rLa] = await Promise.all([
-    fontToDataUri('/fonts/montserrat-normal-vi.woff2'),
-    fontToDataUri('/fonts/montserrat-normal-la.woff2'),
-    fontToDataUri('/fonts/montserrat-italic-vi.woff2'),
-    fontToDataUri('/fonts/montserrat-italic-la.woff2'),
-    fontToDataUri('/fonts/roboto-vi.woff2'),
-    fontToDataUri('/fonts/roboto-la.woff2'),
+  // Fetch font files and convert to data URIs
+  async function toDataUri(path: string): Promise<string> {
+    const buf = await fetch(path).then(r => r.arrayBuffer())
+    const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
+    return `data:font/woff2;base64,${b64}`
+  }
+  const [mnLa, mnVi, miLa, miVi, rLa, rVi] = await Promise.all([
+    toDataUri('/fonts/montserrat-normal-la.woff2'),
+    toDataUri('/fonts/montserrat-normal-vi.woff2'),
+    toDataUri('/fonts/montserrat-italic-la.woff2'),
+    toDataUri('/fonts/montserrat-italic-vi.woff2'),
+    toDataUri('/fonts/roboto-la.woff2'),
+    toDataUri('/fonts/roboto-vi.woff2'),
   ])
 
-  // Vietnamese unicode range (covers Vietnamese characters)
-  const viRange = 'U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB'
+  const face = (name: string, laSrc: string, viSrc: string, extra = '') =>
+    `@font-face{font-family:'${name}';src:url(${viSrc}) format('woff2');unicode-range:${VI_RANGE};${extra}}` +
+    `@font-face{font-family:'${name}';src:url(${laSrc}) format('woff2');${extra}}`
 
-  // For each PostScript name used in the SVG, create @font-face
-  // that maps that exact name to the right woff2 font
-  const makeFace = (psName: string, viSrc: string, laSrc: string, extra = '') =>
-    `@font-face{font-family:'${psName}';src:url(${viSrc}) format('woff2');unicode-range:${viRange};${extra}}` +
-    `@font-face{font-family:'${psName}';src:url(${laSrc}) format('woff2');${extra}}`
-
-  const css = [
-    makeFace('Montserrat-SemiBold',        mnVi, mnLa, 'font-weight:600;'),
-    makeFace('Montserrat-Bold',            mnVi, mnLa, 'font-weight:700;'),
-    makeFace('Montserrat-BoldItalic',      miVi, miLa, 'font-weight:700;font-style:italic;'),
-    makeFace('Montserrat-ExtraBoldItalic', miVi, miLa, 'font-weight:800;font-style:italic;'),
-    makeFace('Montserrat-BlackItalic',     miVi, miLa, 'font-weight:900;font-style:italic;'),
-    makeFace('Roboto-Regular',             rVi,  rLa,  'font-weight:400;'),
-    makeFace('Roboto-Bold',                rVi,  rLa,  'font-weight:700;'),
-    // Also map generic names so fallbacks work
-    makeFace('Montserrat',                 mnVi, mnLa),
-    makeFace('Roboto',                     rVi,  rLa),
+  svgFontCSS = [
+    face('Montserrat-SemiBold',        mnLa, mnVi, 'font-weight:600;'),
+    face('Montserrat-Bold',            mnLa, mnVi, 'font-weight:700;'),
+    face('Montserrat-BoldItalic',      miLa, miVi, 'font-weight:700;font-style:italic;'),
+    face('Montserrat-ExtraBoldItalic', miLa, miVi, 'font-weight:800;font-style:italic;'),
+    face('Montserrat-BlackItalic',     miLa, miVi, 'font-weight:900;font-style:italic;'),
+    face('Roboto-Regular',             rLa,  rVi,  'font-weight:400;'),
+    face('Roboto-Bold',                rLa,  rVi,  'font-weight:700;'),
+    face('Montserrat',                 mnLa, mnVi),
+    face('Roboto',                     rLa,  rVi),
   ].join('')
-
-  fontFaceCache = css
-  return css
+  return svgFontCSS
 }
 
-// Inject font @font-face into SVG string before canvas rendering
 async function injectFonts(svgStr: string): Promise<string> {
-  const fontCSS = await buildFontFaceCSS()
-  // Inject into existing <style> block, or add one after <svg ...>
-  if (svgStr.includes('<style>')) {
-    return svgStr.replace('<style>', `<style>${fontCSS}`)
-  }
-  return svgStr.replace(/(<svg[^>]*>)/, `$1<style>${fontCSS}</style>`)
+  const css = await buildSvgFontCSS()
+  return svgStr.includes('<style>')
+    ? svgStr.replace('<style>', `<style>${css}`)
+    : svgStr.replace(/(<svg[^>]*>)/, `$1<style>${css}</style>`)
 }
 
 function SliderRow({ label, value, min, max, step, onChange }: {
@@ -404,66 +426,54 @@ export default function FlyerEditorPage() {
 
   async function svgToCanvas(): Promise<HTMLCanvasElement> {
     const doc = svgDocRef.current!
-    const svgWithFonts = await injectFonts(getSvgString(doc))
-    const blob = new Blob([svgWithFonts], { type: 'image/svg+xml' })
+
+    // Strategy A: load fonts into document so canvas can use them
+    await loadDocumentFonts()
+
+    // Get SVG string and hard-crop the viewBox to actual design height
+    // (viewBox is 2413.95 but content ends at 2195.16 — ~219px empty below)
+    let svgStr = getSvgString(doc).replace(
+      /viewBox="[^"]+"/,
+      `viewBox="0 0 ${SVG_W} ${EXPORT_H}"`
+    )
+
+    // Strategy B: embed fonts as data-URIs inside the SVG blob
+    svgStr = await injectFonts(svgStr)
+
+    const blob = new Blob([svgStr], { type: 'image/svg+xml' })
     const url = URL.createObjectURL(blob)
     const img = new Image()
-    img.width = Math.round(SVG_W); img.height = Math.round(SVG_H)
-    // Draw on transparent canvas so empty rows have alpha=0 (detectable)
     await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = rej; img.src = url })
     URL.revokeObjectURL(url)
+
+    // Critical: wait for SVG's embedded woff2 fonts to fully decode + render.
+    // img.onload fires when the SVG resource loads, NOT when its @font-face fonts
+    // finish decoding. 400ms covers even slow font decode on first export.
+    await new Promise(res => setTimeout(res, 400))
+
+    const W = Math.round(SVG_W), H = Math.round(EXPORT_H)
     const canvas = document.createElement('canvas')
-    canvas.width = Math.round(SVG_W); canvas.height = Math.round(SVG_H)
+    canvas.width = W; canvas.height = H
     const ctx = canvas.getContext('2d')!
-    // Do NOT pre-fill white — keep transparent so we can detect true bottom
-    ctx.drawImage(img, 0, 0)
-    return trimCanvasBottom(canvas)
-  }
-
-  function trimCanvasBottom(canvas: HTMLCanvasElement): HTMLCanvasElement {
-    const ctx = canvas.getContext('2d')!
-    const { width, height } = canvas
-    const imageData = ctx.getImageData(0, 0, width, height)
-    const data = imageData.data
-
-    // Scan rows from bottom; stop at first row that has any visible pixel
-    let lastRow = height - 1
-    outer: for (let y = height - 1; y >= 0; y--) {
-      const base = y * width * 4
-      // Sample every 6 pixels across the row for speed
-      for (let x = 0; x < width; x += 6) {
-        if (data[base + x * 4 + 3] > 8) { // alpha > 8 = has content
-          lastRow = y
-          break outer
-        }
-      }
-    }
-
-    const newH = Math.min(lastRow + 2, height) // +2px safety margin
-    if (newH >= height) return canvas // nothing to trim
-
-    const out = document.createElement('canvas')
-    out.width = width; out.height = newH
-    out.getContext('2d')!.drawImage(canvas, 0, 0)
-    return out
+    ctx.drawImage(img, 0, 0, W, H)
+    return canvas
   }
 
   async function downloadRaster(format: 'png' | 'jpg') {
     if (!svgDocRef.current) return
     setExporting(true); setDlOpen(false)
     try {
-      const trimmed = await svgToCanvas()
+      const canvas = await svgToCanvas()
       let dataUrl: string
       if (format === 'jpg') {
-        // JPG needs white background — composite onto white canvas
         const out = document.createElement('canvas')
-        out.width = trimmed.width; out.height = trimmed.height
+        out.width = canvas.width; out.height = canvas.height
         const c = out.getContext('2d')!
         c.fillStyle = '#fff'; c.fillRect(0, 0, out.width, out.height)
-        c.drawImage(trimmed, 0, 0)
+        c.drawImage(canvas, 0, 0)
         dataUrl = out.toDataURL('image/jpeg', 0.92)
       } else {
-        dataUrl = trimmed.toDataURL('image/png')
+        dataUrl = canvas.toDataURL('image/png')
       }
       const a = document.createElement('a'); a.href = dataUrl; a.download = `tuyen-dung.${format}`; a.click()
     } catch { alert('Không thể xuất ảnh. Thử dùng SVG.') }
@@ -474,13 +484,12 @@ export default function FlyerEditorPage() {
     if (!svgDocRef.current) return
     setExporting(true); setDlOpen(false)
     try {
-      const trimmed = await svgToCanvas()
-      // Composite on white for PDF print
+      const canvas = await svgToCanvas()
       const out = document.createElement('canvas')
-      out.width = trimmed.width; out.height = trimmed.height
+      out.width = canvas.width; out.height = canvas.height
       const c = out.getContext('2d')!
       c.fillStyle = '#fff'; c.fillRect(0, 0, out.width, out.height)
-      c.drawImage(trimmed, 0, 0)
+      c.drawImage(canvas, 0, 0)
       const dataUrl = out.toDataURL('image/png')
       const win = window.open('', '_blank')
       if (!win) { alert('Trình duyệt chặn popup. Vui lòng cho phép popup.'); setExporting(false); return }

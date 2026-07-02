@@ -460,8 +460,14 @@ export default function FlyerEditorPage() {
     await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = rej; img.src = url })
     URL.revokeObjectURL(url)
 
+    // img.decode() ensures the image is fully rasterized (including SVG's
+    // internal @font-face fonts which load asynchronously after onload).
+    // The extra RAF + 200ms gives the isolated SVG context time to finish
+    // font loading before we draw to canvas.
+    try { await img.decode() } catch { /* ignore decode errors on older Safari */ }
     await document.fonts.ready
     await new Promise(res => requestAnimationFrame(res))
+    await new Promise(res => setTimeout(res, 200))
 
     const canvas = document.createElement('canvas')
     canvas.width = W; canvas.height = H

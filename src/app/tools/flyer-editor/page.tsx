@@ -137,7 +137,7 @@ export default function FlyerEditorPage() {
     const svgEl = document.importNode(doc.documentElement, true) as unknown as SVGSVGElement
     svgEl.style.cssText = [
       'width:100%',
-      'max-width:820px',
+      'max-width:900px',
       'height:auto',
       'display:block',
       'margin:0 auto',
@@ -300,24 +300,52 @@ export default function FlyerEditorPage() {
     URL.revokeObjectURL(url); setDlOpen(false)
   }
 
+  async function svgToCanvas(): Promise<HTMLCanvasElement> {
+    const doc = svgDocRef.current!
+    const blob = new Blob([getSvgString(doc)], { type: 'image/svg+xml' })
+    const url = URL.createObjectURL(blob)
+    const img = new Image()
+    img.width = Math.round(SVG_W); img.height = Math.round(SVG_H)
+    await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = rej; img.src = url })
+    URL.revokeObjectURL(url)
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(SVG_W); canvas.height = Math.round(SVG_H)
+    const ctx = canvas.getContext('2d')!
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(img, 0, 0)
+    return canvas
+  }
+
   async function downloadRaster(format: 'png' | 'jpg') {
-    const doc = svgDocRef.current; if (!doc) return
+    if (!svgDocRef.current) return
     setExporting(true); setDlOpen(false)
     try {
-      const blob = new Blob([getSvgString(doc)], { type: 'image/svg+xml' })
-      const url = URL.createObjectURL(blob)
-      const img = new Image()
-      img.width = Math.round(SVG_W); img.height = Math.round(SVG_H)
-      await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = rej; img.src = url })
-      URL.revokeObjectURL(url)
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.round(SVG_W); canvas.height = Math.round(SVG_H)
-      const ctx = canvas.getContext('2d')!
-      if (format === 'jpg') { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height) }
-      ctx.drawImage(img, 0, 0)
-      const dataUrl = canvas.toDataURL(format === 'jpg' ? 'image/jpeg' : 'image/png', format === 'jpg' ? 0.92 : undefined)
+      const canvas = await svgToCanvas()
+      const dataUrl = canvas.toDataURL(format === 'jpg' ? 'image/jpeg' : 'image/png', 0.92)
       const a = document.createElement('a'); a.href = dataUrl; a.download = `tuyen-dung.${format}`; a.click()
     } catch { alert('Không thể xuất ảnh. Thử dùng SVG.') }
+    setExporting(false)
+  }
+
+  async function downloadPdf() {
+    if (!svgDocRef.current) return
+    setExporting(true); setDlOpen(false)
+    try {
+      const canvas = await svgToCanvas()
+      const dataUrl = canvas.toDataURL('image/png')
+      const win = window.open('', '_blank')
+      if (!win) { alert('Trình duyệt chặn popup. Vui lòng cho phép popup.'); setExporting(false); return }
+      win.document.write(`<!DOCTYPE html><html><head><style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        @page{size:A4 portrait;margin:0}
+        html,body{width:210mm;height:297mm;overflow:hidden}
+        img{width:100%;height:100%;object-fit:contain;display:block}
+      </style></head><body>
+        <img src="${dataUrl}"/>
+        <script>window.onload=()=>{setTimeout(()=>{window.print()},200)}<\/script>
+      </body></html>`)
+      win.document.close()
+    } catch { alert('Không thể xuất PDF.') }
     setExporting(false)
   }
 
@@ -348,6 +376,7 @@ export default function FlyerEditorPage() {
                   { label: 'SVG (vector)', fn: downloadSvg },
                   { label: 'PNG', fn: () => downloadRaster('png') },
                   { label: 'JPG', fn: () => downloadRaster('jpg') },
+                  { label: 'PDF (in / lưu)', fn: downloadPdf },
                 ].map(({ label, fn }) => (
                   <button key={label} onClick={fn}
                     className="flex items-center gap-2 w-full px-4 py-2.5 text-xs text-gray-700 hover:bg-violet-50 hover:text-violet-700 transition-colors">
@@ -375,7 +404,7 @@ export default function FlyerEditorPage() {
           {/* Preview — inline SVG mounted here */}
           <div
             ref={previewRef}
-            style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', padding: 32 }}
+            style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', padding: '12px 8px' }}
           />
 
           {/* Editor panel */}

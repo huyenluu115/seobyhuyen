@@ -94,12 +94,28 @@ function applyLines(textEl: Element, newText: string) {
   })
   tspans.forEach(ts => ts.remove())
   const lines = newText.split('\n')
-  yGroups.forEach((g, i) => {
-    const ns = 'http://www.w3.org/2000/svg'
+
+  // Compute average line-height from existing y-gaps so we can extend beyond template slots
+  let lineH = 40
+  if (yGroups.length >= 2) {
+    const ys = yGroups.map(g => parseFloat(g.y))
+    const gaps = ys.slice(1).map((y, i) => y - ys[i]).filter(d => d > 0)
+    if (gaps.length) lineH = gaps.reduce((a, b) => a + b, 0) / gaps.length
+  }
+  const lastGroup = yGroups[yGroups.length - 1] ?? { y: '0', cls: '', x: '0' }
+  const lastY = parseFloat(lastGroup.y)
+  const fallbackCls = yGroups[0]?.cls ?? ''
+  const fallbackX = yGroups[0]?.x ?? '0'
+
+  const ns = 'http://www.w3.org/2000/svg'
+  lines.forEach((line, i) => {
+    const g = yGroups[i]
     const ts = (textEl.ownerDocument ?? document).createElementNS(ns, 'tspan')
-    ts.setAttribute('x', g.x); ts.setAttribute('y', g.y)
-    if (g.cls) ts.setAttribute('class', g.cls)
-    ts.textContent = lines[i] ?? ''
+    ts.setAttribute('x', g ? g.x : fallbackX)
+    ts.setAttribute('y', g ? g.y : String(Math.round(lastY + lineH * (i - yGroups.length + 1))))
+    const cls = g ? g.cls : fallbackCls
+    if (cls) ts.setAttribute('class', cls)
+    ts.textContent = line
     textEl.appendChild(ts)
   })
 }
@@ -122,8 +138,10 @@ const FONT_DEFS = [
   { name: 'Montserrat-SemiBold',        la: '/fonts/montserrat-normal-la.woff2', vi: '/fonts/montserrat-normal-vi.woff2', style: 'normal',  weight: '600' },
   { name: 'Montserrat-Bold',            la: '/fonts/montserrat-normal-la.woff2', vi: '/fonts/montserrat-normal-vi.woff2', style: 'normal',  weight: '700' },
   { name: 'Montserrat-BoldItalic',      la: '/fonts/montserrat-italic-la.woff2', vi: '/fonts/montserrat-italic-vi.woff2', style: 'italic', weight: '700' },
-  { name: 'Montserrat-ExtraBoldItalic', la: '/fonts/montserrat-italic-la.woff2', vi: '/fonts/montserrat-italic-vi.woff2', style: 'italic', weight: '800' },
-  { name: 'Montserrat-BlackItalic',     la: '/fonts/montserrat-italic-la.woff2', vi: '/fonts/montserrat-italic-vi.woff2', style: 'italic', weight: '900' },
+  // SVG uses Montserrat-ExtraBoldItalic at weight 700, BlackItalic at weight 800
+  // Declare both at the exact weights the SVG requests so the browser matches precisely
+  { name: 'Montserrat-ExtraBoldItalic', la: '/fonts/montserrat-italic-la.woff2', vi: '/fonts/montserrat-italic-vi.woff2', style: 'italic', weight: '700' },
+  { name: 'Montserrat-BlackItalic',     la: '/fonts/montserrat-italic-la.woff2', vi: '/fonts/montserrat-italic-vi.woff2', style: 'italic', weight: '800' },
   { name: 'Roboto-Regular',             la: '/fonts/roboto-la.woff2',            vi: '/fonts/roboto-vi.woff2',            style: 'normal',  weight: '400' },
   { name: 'Roboto-Bold',                la: '/fonts/roboto-la.woff2',            vi: '/fonts/roboto-vi.woff2',            style: 'normal',  weight: '700' },
   { name: 'Montserrat',                 la: '/fonts/montserrat-normal-la.woff2', vi: '/fonts/montserrat-normal-vi.woff2', style: 'normal',  weight: '400 900' },
@@ -607,7 +625,7 @@ export default function FlyerEditorPage() {
                     return (
                       <div key={f.idx}>
                         <label className="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">{f.label}</label>
-                        <textarea value={val} rows={Math.max(1, Math.min(5, val.split('\n').length + 1))}
+                        <textarea value={val} rows={Math.max(2, Math.min(15, val.split('\n').length + 1))}
                           onChange={e => handleTextChange(f.idx, e.target.value)}
                           className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-2 outline-none focus:ring-2 focus:ring-violet-200 resize-none leading-relaxed" />
                         {/* Style controls */}

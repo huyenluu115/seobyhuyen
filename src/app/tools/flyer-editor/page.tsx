@@ -6,23 +6,57 @@ import { cn } from '@/lib/utils'
 
 const FLYER_PATH = '/templates/tuyen-dung-vnce.svg'
 
-const TEXT_FIELDS: Array<{ idx: number; label: string }> = [
-  { idx: 0,  label: 'Tiêu đề lớn (Header)' },
-  { idx: 1,  label: 'Vị trí tuyển dụng' },
-  { idx: 2,  label: 'Tên công ty' },
-  { idx: 3,  label: 'Địa chỉ công ty' },
-  { idx: 4,  label: '"Mô tả công việc" — tiêu đề nhóm' },
-  { idx: 5,  label: '"Yêu cầu chung" — tiêu đề nhóm' },
-  { idx: 6,  label: '"Quyền lợi" — tiêu đề nhóm' },
-  { idx: 7,  label: '"Liên hệ" — tiêu đề nhóm' },
-  { idx: 8,  label: 'Nhãn ngày' },
-  { idx: 9,  label: 'Thông tin website' },
-  { idx: 10, label: 'Email ứng tuyển' },
-  { idx: 11, label: 'Số lượng · Độ tuổi · Giới tính' },
-  { idx: 13, label: 'Yêu cầu chi tiết' },
-  { idx: 14, label: 'Quyền lợi chi tiết' },
-  { idx: 15, label: 'Mô tả công việc chi tiết' },
-]
+interface TextGroup {
+  id: number        // index in the groups array
+  y: number         // Y coordinate from SVG transform
+  label: string     // preview of text content (first 40 chars)
+  idxs: number[]    // indices into querySelectorAll('text')
+}
+
+function getTranslateY(el: Element): number {
+  const m = el.getAttribute('transform')?.match(/translate\s*\(\s*[\d.-]+[\s,]+([\d.-]+)\s*\)/)
+  return m ? parseFloat(m[1]) : -1
+}
+
+function buildTextGroups(doc: Document): TextGroup[] {
+  const texts = Array.from(doc.querySelectorAll('text'))
+  const buckets = new Map<number, { y: number; idxs: number[] }>()
+
+  texts.forEach((el, idx) => {
+    const y = getTranslateY(el)
+    if (y < 0) return
+    let found = -1
+    for (const [k] of buckets) { if (Math.abs(k - y) < 5) { found = k; break } }
+    const key = found >= 0 ? found : y
+    if (!buckets.has(key)) buckets.set(key, { y, idxs: [] })
+    buckets.get(key)!.idxs.push(idx)
+  })
+
+  return Array.from(buckets.values())
+    .sort((a, b) => a.y - b.y)
+    .filter(g => g.idxs.map(i => texts[i].textContent ?? '').join('').trim().length >= 2)
+    .map((g, i) => {
+      const combined = g.idxs.map(i2 => texts[i2].textContent ?? '').join('')
+      return { id: i, y: g.y, label: combined.length > 38 ? combined.slice(0, 38) + '…' : combined, idxs: g.idxs }
+    })
+}
+
+function getGroupText(group: TextGroup, els: NodeListOf<Element>): string {
+  return group.idxs.map(i => els[i]?.textContent ?? '').join('')
+}
+
+function applyGroupText(group: TextGroup, els: NodeListOf<Element>, newText: string) {
+  if (group.idxs.length === 0) return
+  const ns = 'http://www.w3.org/2000/svg'
+  const first = els[group.idxs[0]]; if (!first) return
+  let tspan = first.querySelector('tspan')
+  if (!tspan) { tspan = (first.ownerDocument ?? document).createElementNS(ns, 'tspan'); first.appendChild(tspan) }
+  tspan.textContent = newText
+  for (let i = 1; i < group.idxs.length; i++) {
+    const ts = els[group.idxs[i]]?.querySelector('tspan')
+    if (ts) ts.textContent = ''
+  }
+}
 
 // Only ảnh thứ 2 và 3 — banner (idx 0) removed from controls per request
 const IMAGE_META = [
@@ -34,26 +68,6 @@ const SVG_W = 1690.15
 const SVG_H = 2195.16
 
 interface ImgTransform { tx: number; ty: number; sx: number; sy: number }
-interface TextStyle { fontSize: number; fontWeight: 'normal' | 'bold' }
-
-function readTextStyle(textEl: Element): TextStyle {
-  // font-size may be on <text> or the first <tspan>
-  const fsRaw = textEl.getAttribute('font-size')
-    ?? textEl.querySelector('tspan')?.getAttribute('font-size')
-    ?? ''
-  const fontSize = parseFloat(fsRaw)
-  const fwRaw = textEl.getAttribute('font-weight')
-    ?? textEl.querySelector('tspan')?.getAttribute('font-weight')
-    ?? 'normal'
-  const fontWeight: 'normal' | 'bold' =
-    (fwRaw === 'bold' || Number(fwRaw) >= 700) ? 'bold' : 'normal'
-  return { fontSize: isNaN(fontSize) ? 24 : fontSize, fontWeight }
-}
-
-function applyTextStyle(textEl: Element, style: TextStyle) {
-  textEl.setAttribute('font-size', String(style.fontSize))
-  textEl.setAttribute('font-weight', style.fontWeight)
-}
 
 function parseTransform(str: string): ImgTransform {
   const t = str.match(/translate\(\s*([-\d.]+)[,\s]+([-\d.]+)\s*\)/)
@@ -70,55 +84,6 @@ function buildTransform({ tx, ty, sx, sy }: ImgTransform) {
   return `translate(${tx.toFixed(2)} ${ty.toFixed(2)}) scale(${sx.toFixed(4)} ${sy.toFixed(4)})`
 }
 
-function extractLines(textEl: Element): string {
-  const yMap = new Map<string, string>()
-  textEl.querySelectorAll('tspan').forEach(ts => {
-    const y = ts.getAttribute('y') ?? '0'
-    yMap.set(y, (yMap.get(y) ?? '') + (ts.textContent ?? ''))
-  })
-  return Array.from(yMap.entries())
-    .sort((a, b) => parseFloat(a[0]) - parseFloat(b[0]))
-    .map(([, t]) => t.trim()).join('\n')
-}
-
-function applyLines(textEl: Element, newText: string) {
-  const tspans = Array.from(textEl.querySelectorAll('tspan'))
-  const yGroups: Array<{ y: string; cls: string; x: string }> = []
-  const seen = new Set<string>()
-  tspans.forEach(ts => {
-    const y = ts.getAttribute('y') ?? '0'
-    if (!seen.has(y)) {
-      seen.add(y)
-      yGroups.push({ y, cls: ts.getAttribute('class') ?? '', x: ts.getAttribute('x') ?? '0' })
-    }
-  })
-  tspans.forEach(ts => ts.remove())
-  const lines = newText.split('\n')
-
-  // Compute average line-height from existing y-gaps so we can extend beyond template slots
-  let lineH = 40
-  if (yGroups.length >= 2) {
-    const ys = yGroups.map(g => parseFloat(g.y))
-    const gaps = ys.slice(1).map((y, i) => y - ys[i]).filter(d => d > 0)
-    if (gaps.length) lineH = gaps.reduce((a, b) => a + b, 0) / gaps.length
-  }
-  const lastGroup = yGroups[yGroups.length - 1] ?? { y: '0', cls: '', x: '0' }
-  const lastY = parseFloat(lastGroup.y)
-  const fallbackCls = yGroups[0]?.cls ?? ''
-  const fallbackX = yGroups[0]?.x ?? '0'
-
-  const ns = 'http://www.w3.org/2000/svg'
-  lines.forEach((line, i) => {
-    const g = yGroups[i]
-    const ts = (textEl.ownerDocument ?? document).createElementNS(ns, 'tspan')
-    ts.setAttribute('x', g ? g.x : fallbackX)
-    ts.setAttribute('y', g ? g.y : String(Math.round(lastY + lineH * (i - yGroups.length + 1))))
-    const cls = g ? g.cls : fallbackCls
-    if (cls) ts.setAttribute('class', cls)
-    ts.textContent = line
-    textEl.appendChild(ts)
-  })
-}
 
 function getSvgString(doc: Document): string {
   const el = doc.documentElement
@@ -231,9 +196,8 @@ export default function FlyerEditorPage() {
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [textGroups, setTextGroups] = useState<TextGroup[]>([])
   const [textValues, setTextValues] = useState<Record<number, string>>({})
-  const [textStyles, setTextStyles] = useState<Record<number, TextStyle>>({})
-  const [origTextStyles, setOrigTextStyles] = useState<Record<number, TextStyle>>({})
   const [imgReplaced, setImgReplaced] = useState<Record<number, boolean>>({})
   const [imgTransforms, setImgTransforms] = useState<Record<number, ImgTransform>>({})
   const [origTransforms, setOrigTransforms] = useState<Record<number, ImgTransform>>({})
@@ -324,16 +288,14 @@ export default function FlyerEditorPage() {
         if (doc.querySelector('parsererror')) throw new Error('SVG không hợp lệ')
         svgDocRef.current = doc
 
+        const groups = buildTextGroups(doc)
         const textEls = doc.querySelectorAll('text')
         const vals: Record<number, string> = {}
-        const styles: Record<number, TextStyle> = {}
-        textEls.forEach((el, i) => {
-          vals[i] = extractLines(el)
-          styles[i] = readTextStyle(el)
+        groups.forEach(g => {
+          vals[g.id] = getGroupText(g, textEls)
         })
+        setTextGroups(groups)
         setTextValues(vals)
-        setTextStyles(styles)
-        setOrigTextStyles(styles)
 
         const transforms: Record<number, ImgTransform> = {}
         doc.querySelectorAll('image').forEach((el, i) => {
@@ -355,27 +317,12 @@ export default function FlyerEditorPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading])
 
-  function handleTextChange(idx: number, val: string) {
-    setTextValues(prev => ({ ...prev, [idx]: val }))
+  function handleTextChange(groupId: number, val: string) {
+    setTextValues(prev => ({ ...prev, [groupId]: val }))
+    const group = textGroups[groupId]; if (!group) return
     const doc = svgDocRef.current; if (!doc) return
-    // Patch both the source doc and the live preview element
-    const srcEl = doc.querySelectorAll('text')[idx]
-    if (srcEl) applyLines(srcEl, val)
-    const liveEl = liveSvgRef.current?.querySelectorAll('text')[idx]
-    if (liveEl) applyLines(liveEl, val)
-  }
-
-  function handleStyleChange(idx: number, patch: Partial<TextStyle>) {
-    setTextStyles(prev => {
-      const next = { ...prev[idx], ...patch } as TextStyle
-      // Patch svgDocRef
-      const srcEl = svgDocRef.current?.querySelectorAll('text')[idx]
-      if (srcEl) applyTextStyle(srcEl, next)
-      // Patch live preview
-      const liveEl = liveSvgRef.current?.querySelectorAll('text')[idx]
-      if (liveEl) applyTextStyle(liveEl, next)
-      return { ...prev, [idx]: next }
-    })
+    applyGroupText(group, doc.querySelectorAll('text'), val)
+    if (liveSvgRef.current) applyGroupText(group, liveSvgRef.current.querySelectorAll('text'), val)
   }
 
   function handleImageReplace(imgIdx: number, file: File) {
@@ -597,7 +544,7 @@ export default function FlyerEditorPage() {
                 <button key={s} onClick={() => setActiveSection(s)}
                   className={cn('flex-1 py-2.5 text-xs font-medium transition-colors',
                     activeSection === s ? 'text-violet-600 border-b-2 border-violet-500 bg-violet-50/40' : 'text-gray-500 hover:text-gray-700')}>
-                  {s === 'text' ? `Văn bản (${TEXT_FIELDS.length})` : `Hình ảnh (${IMAGE_META.length})`}
+                  {s === 'text' ? `Văn bản (${textGroups.length})` : `Hình ảnh (${IMAGE_META.length})`}
                 </button>
               ))}
             </div>
@@ -606,50 +553,14 @@ export default function FlyerEditorPage() {
               {/* TEXT TAB */}
               {activeSection === 'text' && (
                 <div className="p-4 space-y-5">
-                  {TEXT_FIELDS.map(f => {
-                    const val = textValues[f.idx] ?? ''
-                    const st = textStyles[f.idx] ?? { fontSize: 24, fontWeight: 'normal' as const }
-                    const isBold = st.fontWeight === 'bold'
+                  {textGroups.map(g => {
+                    const val = textValues[g.id] ?? ''
                     return (
-                      <div key={f.idx}>
-                        <label className="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">{f.label}</label>
+                      <div key={g.id}>
+                        <label className="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">{g.label}</label>
                         <textarea value={val} rows={Math.max(2, Math.min(15, val.split('\n').length + 1))}
-                          onChange={e => handleTextChange(f.idx, e.target.value)}
+                          onChange={e => handleTextChange(g.id, e.target.value)}
                           className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-2 outline-none focus:ring-2 focus:ring-violet-200 resize-none leading-relaxed" />
-                        {/* Style controls */}
-                        <div className="flex items-center gap-2 mt-1.5">
-                          {/* Bold toggle */}
-                          <button
-                            onClick={() => handleStyleChange(f.idx, { fontWeight: isBold ? 'normal' : 'bold' })}
-                            title={isBold ? 'Đang đậm — nhấn để bỏ' : 'Nhấn để in đậm'}
-                            className={cn(
-                              'shrink-0 w-6 h-6 rounded text-xs font-black border transition-colors',
-                              isBold
-                                ? 'bg-gray-800 text-white border-gray-800'
-                                : 'bg-white text-gray-500 border-gray-300 hover:border-gray-600 hover:text-gray-700'
-                            )}>B</button>
-                          {/* Font size number */}
-                          <input
-                            type="number" value={st.fontSize} min={4} max={300} step={1}
-                            onChange={e => {
-                              const v = parseFloat(e.target.value)
-                              if (!isNaN(v) && v > 0) handleStyleChange(f.idx, { fontSize: v })
-                            }}
-                            className="w-14 shrink-0 text-[11px] border border-gray-200 rounded px-1.5 py-0.5 text-center outline-none focus:ring-1 focus:ring-violet-300" />
-                          {/* Font size slider */}
-                          <input
-                            type="range" value={st.fontSize} min={4} max={200} step={1}
-                            onChange={e => handleStyleChange(f.idx, { fontSize: parseFloat(e.target.value) })}
-                            className="flex-1 h-1 accent-violet-500" />
-                          {/* Reset style */}
-                          {(origTextStyles[f.idx] &&
-                            (origTextStyles[f.idx].fontSize !== st.fontSize || origTextStyles[f.idx].fontWeight !== st.fontWeight)) && (
-                            <button
-                              onClick={() => handleStyleChange(f.idx, origTextStyles[f.idx])}
-                              title="Khôi phục style gốc"
-                              className="shrink-0 text-[10px] text-violet-500 hover:text-violet-700">↺</button>
-                          )}
-                        </div>
                       </div>
                     )
                   })}

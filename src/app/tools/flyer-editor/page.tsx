@@ -6,56 +6,79 @@ import { cn } from '@/lib/utils'
 
 const FLYER_PATH = '/templates/tuyen-dung-vnce.svg'
 
-interface TextGroup {
-  id: number        // index in the groups array
-  y: number         // Y coordinate from SVG transform
-  label: string     // preview of text content (first 40 chars)
-  idxs: number[]    // indices into querySelectorAll('text')
+// One row = one visual line in the SVG (same Y coordinate)
+interface TextRow { y: number; idxs: number[] }
+
+// One section = one editable textarea in the panel
+interface TextSection {
+  id: string
+  label: string
+  rows: TextRow[]   // sorted by Y — each row maps to one "\n"-separated line
 }
 
-function getTranslateY(el: Element): number {
-  const m = el.getAttribute('transform')?.match(/translate\s*\(\s*[\d.-]+[\s,]+([\d.-]+)\s*\)/)
-  return m ? parseFloat(m[1]) : -1
+// Hardcoded section boundaries for tuyen-dung-vnce.svg.
+// xMin/xMax split the two-column content area (left col: Mô tả, right col: Yêu cầu).
+const SECTION_DEFS = [
+  { id: 'company',  label: 'Tên công ty',       xMin: 0,   xMax: 9999, yMin: 140,  yMax: 260  },
+  { id: 'title',    label: 'Vị trí tuyển dụng', xMin: 0,   xMax: 9999, yMin: 400,  yMax: 460  },
+  { id: 'address',  label: 'Địa chỉ',            xMin: 0,   xMax: 9999, yMin: 630,  yMax: 700  },
+  { id: 'motacv',   label: 'Mô tả công việc',   xMin: 0,   xMax: 750,  yMin: 1300, yMax: 1600 },
+  { id: 'yeucau',   label: 'Yêu cầu chung',     xMin: 750, xMax: 9999, yMin: 1300, yMax: 1600 },
+  { id: 'quyloi',   label: 'Quyền lợi',          xMin: 0,   xMax: 9999, yMin: 1770, yMax: 1970 },
+  { id: 'lienhe',   label: 'Liên hệ',            xMin: 0,   xMax: 9999, yMin: 2040, yMax: 2100 },
+] as const
+
+function getXY(el: Element): { x: number; y: number } | null {
+  const m = el.getAttribute('transform')?.match(/translate\(([-\d.]+)[\s,]+([-\d.]+)\)/)
+  return m ? { x: parseFloat(m[1]), y: parseFloat(m[2]) } : null
 }
 
-function buildTextGroups(doc: Document): TextGroup[] {
+function buildTextSections(doc: Document): TextSection[] {
   const texts = Array.from(doc.querySelectorAll('text'))
-  const buckets = new Map<number, { y: number; idxs: number[] }>()
 
-  texts.forEach((el, idx) => {
-    const y = getTranslateY(el)
-    if (y < 0) return
-    let found = -1
-    for (const [k] of buckets) { if (Math.abs(k - y) < 5) { found = k; break } }
-    const key = found >= 0 ? found : y
-    if (!buckets.has(key)) buckets.set(key, { y, idxs: [] })
-    buckets.get(key)!.idxs.push(idx)
-  })
+  return SECTION_DEFS.map(def => {
+    const rowMap = new Map<number, number[]>()
 
-  return Array.from(buckets.values())
-    .sort((a, b) => a.y - b.y)
-    .filter(g => g.idxs.map(i => texts[i].textContent ?? '').join('').trim().length >= 2)
-    .map((g, i) => {
-      const combined = g.idxs.map(i2 => texts[i2].textContent ?? '').join('')
-      return { id: i, y: g.y, label: combined.length > 38 ? combined.slice(0, 38) + '…' : combined, idxs: g.idxs }
+    texts.forEach((el, idx) => {
+      const pos = getXY(el)
+      if (!pos) return
+      if (pos.x < def.xMin || pos.x >= def.xMax) return
+      if (pos.y < def.yMin || pos.y >= def.yMax) return
+
+      let key = -1
+      for (const [k] of rowMap) { if (Math.abs(k - pos.y) < 5) { key = k; break } }
+      if (key < 0) { key = pos.y; rowMap.set(key, []) }
+      rowMap.get(key)!.push(idx)
     })
+
+    const rows: TextRow[] = Array.from(rowMap.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([y, idxs]) => ({ y, idxs }))
+
+    return { id: def.id, label: def.label, rows }
+  }).filter(s => s.rows.length > 0)
 }
 
-function getGroupText(group: TextGroup, els: NodeListOf<Element>): string {
-  return group.idxs.map(i => els[i]?.textContent ?? '').join('')
+function getSectionText(section: TextSection, els: NodeListOf<Element>): string {
+  return section.rows
+    .map(row => row.idxs.map(i => els[i]?.textContent ?? '').join(''))
+    .join('\n')
 }
 
-function applyGroupText(group: TextGroup, els: NodeListOf<Element>, newText: string) {
-  if (group.idxs.length === 0) return
+function applySectionText(section: TextSection, els: NodeListOf<Element>, newText: string) {
   const ns = 'http://www.w3.org/2000/svg'
-  const first = els[group.idxs[0]]; if (!first) return
-  let tspan = first.querySelector('tspan')
-  if (!tspan) { tspan = (first.ownerDocument ?? document).createElementNS(ns, 'tspan'); first.appendChild(tspan) }
-  tspan.textContent = newText
-  for (let i = 1; i < group.idxs.length; i++) {
-    const ts = els[group.idxs[i]]?.querySelector('tspan')
-    if (ts) ts.textContent = ''
-  }
+  const lines = newText.split('\n')
+  section.rows.forEach((row, rowIdx) => {
+    const lineText = lines[rowIdx] ?? ''
+    const first = els[row.idxs[0]]; if (!first) return
+    let tspan = first.querySelector('tspan')
+    if (!tspan) { tspan = (first.ownerDocument ?? document).createElementNS(ns, 'tspan'); first.appendChild(tspan) }
+    tspan.textContent = lineText
+    for (let i = 1; i < row.idxs.length; i++) {
+      const ts = els[row.idxs[i]]?.querySelector('tspan')
+      if (ts) ts.textContent = ''
+    }
+  })
 }
 
 // Only ảnh thứ 2 và 3 — banner (idx 0) removed from controls per request
@@ -196,8 +219,8 @@ export default function FlyerEditorPage() {
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
-  const [textGroups, setTextGroups] = useState<TextGroup[]>([])
-  const [textValues, setTextValues] = useState<Record<number, string>>({})
+  const [textSections, setTextSections] = useState<TextSection[]>([])
+  const [textValues, setTextValues] = useState<Record<string, string>>({})
   const [imgReplaced, setImgReplaced] = useState<Record<number, boolean>>({})
   const [imgTransforms, setImgTransforms] = useState<Record<number, ImgTransform>>({})
   const [origTransforms, setOrigTransforms] = useState<Record<number, ImgTransform>>({})
@@ -288,13 +311,11 @@ export default function FlyerEditorPage() {
         if (doc.querySelector('parsererror')) throw new Error('SVG không hợp lệ')
         svgDocRef.current = doc
 
-        const groups = buildTextGroups(doc)
+        const sections = buildTextSections(doc)
         const textEls = doc.querySelectorAll('text')
-        const vals: Record<number, string> = {}
-        groups.forEach(g => {
-          vals[g.id] = getGroupText(g, textEls)
-        })
-        setTextGroups(groups)
+        const vals: Record<string, string> = {}
+        sections.forEach(s => { vals[s.id] = getSectionText(s, textEls) })
+        setTextSections(sections)
         setTextValues(vals)
 
         const transforms: Record<number, ImgTransform> = {}
@@ -317,12 +338,12 @@ export default function FlyerEditorPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading])
 
-  function handleTextChange(groupId: number, val: string) {
-    setTextValues(prev => ({ ...prev, [groupId]: val }))
-    const group = textGroups[groupId]; if (!group) return
+  function handleTextChange(sectionId: string, val: string) {
+    setTextValues(prev => ({ ...prev, [sectionId]: val }))
+    const section = textSections.find(s => s.id === sectionId); if (!section) return
     const doc = svgDocRef.current; if (!doc) return
-    applyGroupText(group, doc.querySelectorAll('text'), val)
-    if (liveSvgRef.current) applyGroupText(group, liveSvgRef.current.querySelectorAll('text'), val)
+    applySectionText(section, doc.querySelectorAll('text'), val)
+    if (liveSvgRef.current) applySectionText(section, liveSvgRef.current.querySelectorAll('text'), val)
   }
 
   function handleImageReplace(imgIdx: number, file: File) {
@@ -544,7 +565,7 @@ export default function FlyerEditorPage() {
                 <button key={s} onClick={() => setActiveSection(s)}
                   className={cn('flex-1 py-2.5 text-xs font-medium transition-colors',
                     activeSection === s ? 'text-violet-600 border-b-2 border-violet-500 bg-violet-50/40' : 'text-gray-500 hover:text-gray-700')}>
-                  {s === 'text' ? `Văn bản (${textGroups.length})` : `Hình ảnh (${IMAGE_META.length})`}
+                  {s === 'text' ? `Văn bản (${textSections.length})` : `Hình ảnh (${IMAGE_META.length})`}
                 </button>
               ))}
             </div>
@@ -553,14 +574,19 @@ export default function FlyerEditorPage() {
               {/* TEXT TAB */}
               {activeSection === 'text' && (
                 <div className="p-4 space-y-5">
-                  {textGroups.map(g => {
-                    const val = textValues[g.id] ?? ''
+                  {textSections.map(s => {
+                    const val = textValues[s.id] ?? ''
+                    const lineCount = val.split('\n').length
                     return (
-                      <div key={g.id}>
-                        <label className="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">{g.label}</label>
-                        <textarea value={val} rows={Math.max(2, Math.min(15, val.split('\n').length + 1))}
-                          onChange={e => handleTextChange(g.id, e.target.value)}
-                          className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-2 outline-none focus:ring-2 focus:ring-violet-200 resize-none leading-relaxed" />
+                      <div key={s.id}>
+                        <label className="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">{s.label}</label>
+                        <textarea
+                          value={val}
+                          rows={Math.max(2, Math.min(20, lineCount + 1))}
+                          onChange={e => handleTextChange(s.id, e.target.value)}
+                          className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-2 outline-none focus:ring-2 focus:ring-violet-200 resize-none leading-relaxed"
+                        />
+                        <p className="text-[9px] text-gray-300 mt-0.5">{lineCount} dòng · {s.rows.length} dòng trong mẫu</p>
                       </div>
                     )
                   })}

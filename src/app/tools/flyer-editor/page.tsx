@@ -26,12 +26,12 @@ const TEXT_FIELDS: Array<{ idx: number; label: string }> = [
 
 // Only ảnh thứ 2 và 3 — banner (idx 0) removed from controls per request
 const IMAGE_META = [
-  { idx: 1, label: 'Ảnh thứ 2', size: '626 × 417', w: 626, h: 417 },
-  { idx: 2, label: 'Ảnh thứ 3', size: '725 × 489', w: 725,  h: 489 },
+  { idx: 1, label: 'Ảnh thứ 2', size: '633 × 424', w: 633, h: 424 },
+  { idx: 2, label: 'Ảnh thứ 3', size: '724 × 455', w: 724,  h: 455 },
 ]
 
-const SVG_W = 1596.17
-const SVG_H = 2413.95
+const SVG_W = 1690.15
+const SVG_H = 2195.16
 
 interface ImgTransform { tx: number; ty: number; sx: number; sy: number }
 interface TextStyle { fontSize: number; fontWeight: 'normal' | 'bold' }
@@ -126,26 +126,20 @@ function getSvgString(doc: Document): string {
   return new XMLSerializer().serializeToString(doc)
 }
 
-// Actual design content height — the background rect ends at 65.26+2129.9=2195.16.
-// The viewBox is 2413.95, leaving ~219 empty units below. We crop to this.
-const EXPORT_H = 2195.16
+// Export height equals SVG height — new SVG is already cropped to exact content
+const EXPORT_H = SVG_H
 
 // Vietnamese unicode range
 const VI_RANGE = 'U+0102-0103,U+0110-0111,U+0128-0129,U+0168-0169,U+01A0-01A1,U+01AF-01B0,U+0300-0301,U+0303-0304,U+0308-0309,U+0323,U+0329,U+1EA0-1EF9,U+20AB'
 
 // Map of PostScript font name → file paths + descriptor
+// New SVG uses only Montserrat variants (no Roboto)
 const FONT_DEFS = [
-  { name: 'Montserrat-SemiBold',        la: '/fonts/montserrat-normal-la.woff2', vi: '/fonts/montserrat-normal-vi.woff2', style: 'normal',  weight: '600' },
-  { name: 'Montserrat-Bold',            la: '/fonts/montserrat-normal-la.woff2', vi: '/fonts/montserrat-normal-vi.woff2', style: 'normal',  weight: '700' },
+  { name: 'Montserrat-SemiBold',        la: '/fonts/montserrat-normal-la.woff2', vi: '/fonts/montserrat-normal-vi.woff2', style: 'normal', weight: '600' },
+  { name: 'Montserrat-Bold',            la: '/fonts/montserrat-normal-la.woff2', vi: '/fonts/montserrat-normal-vi.woff2', style: 'normal', weight: '700' },
   { name: 'Montserrat-BoldItalic',      la: '/fonts/montserrat-italic-la.woff2', vi: '/fonts/montserrat-italic-vi.woff2', style: 'italic', weight: '700' },
-  // SVG uses Montserrat-ExtraBoldItalic at weight 700, BlackItalic at weight 800
-  // Declare both at the exact weights the SVG requests so the browser matches precisely
   { name: 'Montserrat-ExtraBoldItalic', la: '/fonts/montserrat-italic-la.woff2', vi: '/fonts/montserrat-italic-vi.woff2', style: 'italic', weight: '700' },
-  { name: 'Montserrat-BlackItalic',     la: '/fonts/montserrat-italic-la.woff2', vi: '/fonts/montserrat-italic-vi.woff2', style: 'italic', weight: '800' },
-  { name: 'Roboto-Regular',             la: '/fonts/roboto-la.woff2',            vi: '/fonts/roboto-vi.woff2',            style: 'normal',  weight: '400' },
-  { name: 'Roboto-Bold',                la: '/fonts/roboto-la.woff2',            vi: '/fonts/roboto-vi.woff2',            style: 'normal',  weight: '700' },
-  { name: 'Montserrat',                 la: '/fonts/montserrat-normal-la.woff2', vi: '/fonts/montserrat-normal-vi.woff2', style: 'normal',  weight: '400 900' },
-  { name: 'Roboto',                     la: '/fonts/roboto-la.woff2',            vi: '/fonts/roboto-vi.woff2',            style: 'normal',  weight: '400 700' },
+  { name: 'Montserrat',                 la: '/fonts/montserrat-normal-la.woff2', vi: '/fonts/montserrat-normal-vi.woff2', style: 'normal', weight: '400 900' },
 ] as const
 
 // ── Font loading: two strategies run in parallel ────────────────────────────
@@ -184,13 +178,11 @@ async function buildSvgFontCSS(): Promise<string> {
     }
     return `data:font/woff2;base64,${btoa(binary)}`
   }
-  const [mnLa, mnVi, miLa, miVi, rLa, rVi] = await Promise.all([
+  const [mnLa, mnVi, miLa, miVi] = await Promise.all([
     toDataUri('/fonts/montserrat-normal-la.woff2'),
     toDataUri('/fonts/montserrat-normal-vi.woff2'),
     toDataUri('/fonts/montserrat-italic-la.woff2'),
     toDataUri('/fonts/montserrat-italic-vi.woff2'),
-    toDataUri('/fonts/roboto-la.woff2'),
-    toDataUri('/fonts/roboto-vi.woff2'),
   ])
 
   const face = (name: string, laSrc: string, viSrc: string, extra = '') =>
@@ -202,11 +194,7 @@ async function buildSvgFontCSS(): Promise<string> {
     face('Montserrat-Bold',            mnLa, mnVi, 'font-weight:700;'),
     face('Montserrat-BoldItalic',      miLa, miVi, 'font-weight:700;font-style:italic;'),
     face('Montserrat-ExtraBoldItalic', miLa, miVi, 'font-weight:700;font-style:italic;'),
-    face('Montserrat-BlackItalic',     miLa, miVi, 'font-weight:800;font-style:italic;'),
-    face('Roboto-Regular',             rLa,  rVi,  'font-weight:400;'),
-    face('Roboto-Bold',                rLa,  rVi,  'font-weight:700;'),
     face('Montserrat',                 mnLa, mnVi),
-    face('Roboto',                     rLa,  rVi),
   ].join('')
   return svgFontCSS
 }

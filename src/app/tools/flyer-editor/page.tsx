@@ -13,19 +13,21 @@ interface TextRow { y: number; idxs: number[] }
 interface TextSection {
   id: string
   label: string
+  bold: boolean     // whether to render the label as a bold section header
   rows: TextRow[]   // sorted by Y — each row maps to one "\n"-separated line
 }
 
 // Hardcoded section boundaries for tuyen-dung-vnce.svg.
 // xMin/xMax split the two-column content area (left col: Mô tả, right col: Yêu cầu).
 const SECTION_DEFS = [
-  { id: 'company',  label: 'Tên công ty',       xMin: 0,   xMax: 9999, yMin: 140,  yMax: 260  },
-  { id: 'title',    label: 'Vị trí tuyển dụng', xMin: 0,   xMax: 9999, yMin: 400,  yMax: 460  },
-  { id: 'address',  label: 'Địa chỉ',            xMin: 0,   xMax: 9999, yMin: 630,  yMax: 700  },
-  { id: 'motacv',   label: 'Mô tả công việc',   xMin: 0,   xMax: 750,  yMin: 1300, yMax: 1600 },
-  { id: 'yeucau',   label: 'Yêu cầu chung',     xMin: 750, xMax: 9999, yMin: 1300, yMax: 1600 },
-  { id: 'quyloi',   label: 'Quyền lợi',          xMin: 0,   xMax: 9999, yMin: 1770, yMax: 1970 },
-  { id: 'lienhe',   label: 'Liên hệ',            xMin: 0,   xMax: 9999, yMin: 2040, yMax: 2100 },
+  { id: 'company',    label: 'Tên công ty',       xMin: 0,   xMax: 9999, yMin: 140,  yMax: 260,  bold: false },
+  { id: 'tuyendung',  label: 'TUYỂN DỤNG',        xMin: 0,   xMax: 9999, yMin: 360,  yMax: 400,  bold: true  },
+  { id: 'title',      label: 'Vị trí tuyển dụng', xMin: 0,   xMax: 9999, yMin: 400,  yMax: 460,  bold: false },
+  { id: 'address',    label: 'Địa chỉ',            xMin: 0,   xMax: 9999, yMin: 630,  yMax: 700,  bold: false },
+  { id: 'motacv',     label: 'Mô tả công việc',   xMin: 0,   xMax: 750,  yMin: 1300, yMax: 1600, bold: true  },
+  { id: 'yeucau',     label: 'Yêu cầu chung',     xMin: 750, xMax: 9999, yMin: 1300, yMax: 1600, bold: true  },
+  { id: 'quyloi',     label: 'Quyền lợi',          xMin: 0,   xMax: 9999, yMin: 1770, yMax: 1970, bold: true  },
+  { id: 'lienhe',     label: 'Liên hệ',            xMin: 0,   xMax: 9999, yMin: 2040, yMax: 2100, bold: false },
 ] as const
 
 function getXY(el: Element): { x: number; y: number } | null {
@@ -55,7 +57,7 @@ function buildTextSections(doc: Document): TextSection[] {
       .sort((a, b) => a[0] - b[0])
       .map(([y, idxs]) => ({ y, idxs }))
 
-    return { id: def.id, label: def.label, rows }
+    return { id: def.id, label: def.label, bold: def.bold, rows }
   }).filter(s => s.rows.length > 0)
 }
 
@@ -573,18 +575,25 @@ export default function FlyerEditorPage() {
             <div className="flex-1 overflow-y-auto">
               {/* TEXT TAB */}
               {activeSection === 'text' && (
-                <div className="p-4 space-y-5">
+                <div className="p-3 space-y-4">
                   {textSections.map(s => {
                     const val = textValues[s.id] ?? ''
                     const lineCount = val.split('\n').length
                     return (
-                      <div key={s.id}>
-                        <label className="block text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1.5">{s.label}</label>
+                      <div key={s.id} className={s.bold ? 'rounded-lg border border-violet-100 bg-violet-50/40 p-3' : ''}>
+                        <label className={cn(
+                          'block mb-1.5',
+                          s.bold
+                            ? 'text-sm font-extrabold text-violet-700'
+                            : 'text-[10px] font-bold uppercase tracking-widest text-gray-400'
+                        )}>
+                          {s.label}
+                        </label>
                         <textarea
                           value={val}
                           rows={Math.max(2, Math.min(20, lineCount + 1))}
                           onChange={e => handleTextChange(s.id, e.target.value)}
-                          className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-2 outline-none focus:ring-2 focus:ring-violet-200 resize-none leading-relaxed"
+                          className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-2 outline-none focus:ring-2 focus:ring-violet-200 resize-none leading-relaxed bg-white"
                         />
                         <p className="text-[9px] text-gray-300 mt-0.5">{lineCount} dòng · {s.rows.length} dòng trong mẫu</p>
                       </div>

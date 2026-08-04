@@ -9,27 +9,39 @@ const FLYER_PATH = '/templates/tuyen-dung-vnce.svg'
 // One row = one visual line in the SVG (same Y coordinate)
 interface TextRow { y: number; idxs: number[] }
 
+// Sections whose content lives in dynamically-injected <text> elements.
+// startY = baseline of first line, lineH = gap between baselines.
+interface InjectZone { x: number; startY: number; lineH: number; maxLines: number }
+
 // One section = one editable textarea in the panel
 interface TextSection {
   id: string
   label: string
-  bold: boolean     // whether to render the label as a bold section header
-  rows: TextRow[]   // sorted by Y — each row maps to one "\n"-separated line
+  bold: boolean
+  rows: TextRow[]          // existing text elements (empty for inject-only sections)
+  injectZone?: InjectZone  // present when content must be injected dynamically
 }
 
-// Hardcoded section boundaries for tuyen-dung-vnce.svg.
-// xMin/xMax split the two-column content area (left col: Mô tả, right col: Yêu cầu).
 const SECTION_DEFS = [
-  { id: 'company',    label: 'Tên công ty',       xMin: 0,   xMax: 9999, yMin: 160,  yMax: 250,  bold: false },
-  { id: 'tuyendung',  label: 'TUYỂN DỤNG',        xMin: 0,   xMax: 9999, yMin: 370,  yMax: 400,  bold: true  },
-  { id: 'title',      label: 'Vị trí tuyển dụng', xMin: 0,   xMax: 9999, yMin: 430,  yMax: 470,  bold: false },
-  { id: 'soluong',    label: 'Số lượng',           xMin: 0,   xMax: 9999, yMin: 480,  yMax: 515,  bold: false },
-  { id: 'address',    label: 'Địa chỉ',            xMin: 0,   xMax: 9999, yMin: 655,  yMax: 715,  bold: false },
-  { id: 'motacv',     label: 'Mô tả công việc',   xMin: 0,   xMax: 500,  yMin: 1280, yMax: 1310, bold: true  },
-  { id: 'yeucau',     label: 'Yêu cầu chung',     xMin: 500, xMax: 9999, yMin: 1280, yMax: 1315, bold: true  },
-  { id: 'quyloi',     label: 'Quyền lợi',          xMin: 0,   xMax: 9999, yMin: 1770, yMax: 1800, bold: true  },
-  { id: 'lienhe',     label: 'Liên hệ',            xMin: 0,   xMax: 9999, yMin: 2095, yMax: 2165, bold: false },
+  { id: 'company',   label: 'Tên công ty',       xMin: 0,   xMax: 9999, yMin: 160,  yMax: 250,  bold: false },
+  { id: 'tuyendung', label: 'TUYỂN DỤNG',        xMin: 0,   xMax: 9999, yMin: 370,  yMax: 400,  bold: true  },
+  { id: 'title',     label: 'Vị trí tuyển dụng', xMin: 0,   xMax: 9999, yMin: 430,  yMax: 470,  bold: false },
+  { id: 'soluong',   label: 'Số lượng',           xMin: 0,   xMax: 9999, yMin: 480,  yMax: 515,  bold: false },
+  { id: 'address',   label: 'Địa chỉ',            xMin: 0,   xMax: 9999, yMin: 655,  yMax: 715,  bold: false },
+  // Content sections: yMin is past the section-label so existing rows = 0; injectZone provides positions.
+  { id: 'motacv',    label: 'Mô tả công việc',   xMin: 0,   xMax: 750,  yMin: 1340, yMax: 1730, bold: true  },
+  { id: 'yeucau',    label: 'Yêu cầu chung',     xMin: 750, xMax: 9999, yMin: 1340, yMax: 1730, bold: true  },
+  { id: 'quyloi',    label: 'Quyền lợi',          xMin: 0,   xMax: 9999, yMin: 1820, yMax: 2090, bold: true  },
+  { id: 'lienhe',    label: 'Liên hệ',            xMin: 0,   xMax: 9999, yMin: 2095, yMax: 2165, bold: false },
 ] as const
+
+// Positions for injected content lines — calibrated to the rect grid in the SVG.
+// lineH matches the rect row height (35.65 ≈ 36).
+const INJECT_ZONES: Partial<Record<string, InjectZone>> = {
+  motacv: { x: 218, startY: 1248, lineH: 35.65, maxLines: 14 },
+  yeucau: { x: 948, startY: 1248, lineH: 35.65, maxLines: 14 },
+  quyloi: { x: 229, startY: 1840, lineH: 35.65, maxLines: 10 },
+}
 
 function getXY(el: Element): { x: number; y: number } | null {
   const m = el.getAttribute('transform')?.match(/translate\(([-\d.]+)[\s,]+([-\d.]+)\)/)
@@ -58,17 +70,46 @@ function buildTextSections(doc: Document): TextSection[] {
       .sort((a, b) => a[0] - b[0])
       .map(([y, idxs]) => ({ y, idxs }))
 
-    return { id: def.id, label: def.label, bold: def.bold, rows }
-  }).filter(s => s.rows.length > 0)
+    const injectZone = INJECT_ZONES[def.id]
+    return { id: def.id, label: def.label, bold: def.bold, rows, injectZone }
+  }).filter(s => s.rows.length > 0 || !!s.injectZone)
 }
 
 function getSectionText(section: TextSection, els: NodeListOf<Element>): string {
+  if (section.rows.length === 0) return '' // inject-only: start empty
   return section.rows
     .map(row => row.idxs.map(i => els[i]?.textContent ?? '').join(''))
     .join('\n')
 }
 
-function applySectionText(section: TextSection, els: NodeListOf<Element>, newText: string) {
+// Inject text lines into a <g id="inject-{sectionId}"> group, creating it if needed.
+function injectLines(svgRoot: Element, sectionId: string, zone: InjectZone, lines: string[]) {
+  const ns = 'http://www.w3.org/2000/svg'
+  const doc = svgRoot.ownerDocument ?? document
+  const gId = `inject-${sectionId}`
+  let g = svgRoot.querySelector(`#${gId}`)
+  if (!g) { g = doc.createElementNS(ns, 'g'); g.setAttribute('id', gId); svgRoot.appendChild(g) }
+  while (g.firstChild) g.removeChild(g.firstChild)
+  const CONTENT_STYLE = 'font-family:Montserrat-SemiBold,Montserrat;font-size:22px;font-weight:600;fill:#333232'
+  lines.slice(0, zone.maxLines).forEach((line, i) => {
+    const el = doc.createElementNS(ns, 'text')
+    el.setAttribute('transform', `translate(${zone.x} ${(zone.startY + i * zone.lineH).toFixed(2)})`)
+    el.setAttribute('style', CONTENT_STYLE)
+    const ts = doc.createElementNS(ns, 'tspan')
+    ts.setAttribute('x', '0'); ts.setAttribute('y', '0')
+    ts.textContent = line
+    el.appendChild(ts); g!.appendChild(el)
+  })
+}
+
+function applySectionText(section: TextSection, svgRoot: Element | null, els: NodeListOf<Element>, newText: string) {
+  if (!svgRoot) return
+  if (section.injectZone && section.rows.length === 0) {
+    // inject-only section
+    const lines = newText.split('\n')
+    injectLines(svgRoot, section.id, section.injectZone, lines)
+    return
+  }
   const ns = 'http://www.w3.org/2000/svg'
   const lines = newText.split('\n')
   section.rows.forEach((row, rowIdx) => {
@@ -345,8 +386,8 @@ export default function FlyerEditorPage() {
     setTextValues(prev => ({ ...prev, [sectionId]: val }))
     const section = textSections.find(s => s.id === sectionId); if (!section) return
     const doc = svgDocRef.current; if (!doc) return
-    applySectionText(section, doc.querySelectorAll('text'), val)
-    if (liveSvgRef.current) applySectionText(section, liveSvgRef.current.querySelectorAll('text'), val)
+    applySectionText(section, doc.documentElement, doc.querySelectorAll('text'), val)
+    if (liveSvgRef.current) applySectionText(section, liveSvgRef.current, liveSvgRef.current.querySelectorAll('text'), val)
   }
 
   function handleImageReplace(imgIdx: number, file: File) {

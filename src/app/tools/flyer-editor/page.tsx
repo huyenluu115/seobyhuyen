@@ -20,14 +20,15 @@ interface TextSection {
 // Hardcoded section boundaries for tuyen-dung-vnce.svg.
 // xMin/xMax split the two-column content area (left col: Mô tả, right col: Yêu cầu).
 const SECTION_DEFS = [
-  { id: 'company',    label: 'Tên công ty',       xMin: 0,   xMax: 9999, yMin: 140,  yMax: 260,  bold: false },
-  { id: 'tuyendung',  label: 'TUYỂN DỤNG',        xMin: 0,   xMax: 9999, yMin: 360,  yMax: 400,  bold: true  },
-  { id: 'title',      label: 'Vị trí tuyển dụng', xMin: 0,   xMax: 9999, yMin: 400,  yMax: 460,  bold: false },
-  { id: 'address',    label: 'Địa chỉ',            xMin: 0,   xMax: 9999, yMin: 630,  yMax: 700,  bold: false },
-  { id: 'motacv',     label: 'Mô tả công việc',   xMin: 0,   xMax: 750,  yMin: 1300, yMax: 1600, bold: true  },
-  { id: 'yeucau',     label: 'Yêu cầu chung',     xMin: 750, xMax: 9999, yMin: 1300, yMax: 1600, bold: true  },
-  { id: 'quyloi',     label: 'Quyền lợi',          xMin: 0,   xMax: 9999, yMin: 1770, yMax: 1970, bold: true  },
-  { id: 'lienhe',     label: 'Liên hệ',            xMin: 0,   xMax: 9999, yMin: 2040, yMax: 2100, bold: false },
+  { id: 'company',    label: 'Tên công ty',       xMin: 0,   xMax: 9999, yMin: 160,  yMax: 250,  bold: false },
+  { id: 'tuyendung',  label: 'TUYỂN DỤNG',        xMin: 0,   xMax: 9999, yMin: 370,  yMax: 400,  bold: true  },
+  { id: 'title',      label: 'Vị trí tuyển dụng', xMin: 0,   xMax: 9999, yMin: 430,  yMax: 470,  bold: false },
+  { id: 'soluong',    label: 'Số lượng',           xMin: 0,   xMax: 9999, yMin: 480,  yMax: 515,  bold: false },
+  { id: 'address',    label: 'Địa chỉ',            xMin: 0,   xMax: 9999, yMin: 655,  yMax: 715,  bold: false },
+  { id: 'motacv',     label: 'Mô tả công việc',   xMin: 0,   xMax: 500,  yMin: 1280, yMax: 1310, bold: true  },
+  { id: 'yeucau',     label: 'Yêu cầu chung',     xMin: 500, xMax: 9999, yMin: 1280, yMax: 1315, bold: true  },
+  { id: 'quyloi',     label: 'Quyền lợi',          xMin: 0,   xMax: 9999, yMin: 1770, yMax: 1800, bold: true  },
+  { id: 'lienhe',     label: 'Liên hệ',            xMin: 0,   xMax: 9999, yMin: 2095, yMax: 2165, bold: false },
 ] as const
 
 function getXY(el: Element): { x: number; y: number } | null {
@@ -85,12 +86,12 @@ function applySectionText(section: TextSection, els: NodeListOf<Element>, newTex
 
 // Only ảnh thứ 2 và 3 — banner (idx 0) removed from controls per request
 const IMAGE_META = [
-  { idx: 1, label: 'Ảnh thứ 2', size: '633 × 424', w: 633, h: 424 },
-  { idx: 2, label: 'Ảnh thứ 3', size: '724 × 455', w: 724,  h: 455 },
+  { idx: 1, label: 'Ảnh thứ 2', size: '644 × 410', w: 644, h: 410 },
+  { idx: 2, label: 'Ảnh thứ 3', size: '723 × 423', w: 723, h: 423 },
 ]
 
-const SVG_W = 1690.15
-const SVG_H = 2195.16
+const SVG_W = 1825.66
+const SVG_H = 2262.42
 
 interface ImgTransform { tx: number; ty: number; sx: number; sy: number }
 
